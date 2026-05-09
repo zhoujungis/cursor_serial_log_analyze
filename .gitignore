@@ -1,0 +1,15 @@
+# 密钥与环境（切勿提交）
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE
+.idea/
+
+# 本地串口落盘日志
+serial_capture/
