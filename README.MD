@@ -1,14 +1,20 @@
-# 安装依赖库
-```
-pip install requirements.txt
+# 安装依赖
+
+```text
+pip install -r requirements.txt
 ```
 
-# 开启Web服务器
-```
-uvicorn backend_web:app --reload
+# 桌面分析
+
+```text
+python desktop_serial_log_analyzer.py
 ```
 
-# 打开Web
+菜单「文件 → 打开…」选择 `.log` / `.txt`，配置规则与 Cursor 环境变量（见 `.env`：`CURSOR_API_KEY`、`CURSOR_GITHUB_REPO` 等）。
+
+# 在线串口 Agent（可选）
+
+```text
+python desktop_serial_log_analyzer.py
 ```
-http://localhost:8000
-```
+

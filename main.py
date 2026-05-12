@@ -31,6 +31,13 @@ def _cursor_basic_auth_header(api_key: str) -> str:
     return f"Basic {token}"
 
 
+def _normalize_github_repo_url(url: str) -> str:
+    u = (url or "").strip().rstrip("/")
+    if len(u) >= 4 and u.lower().endswith(".git"):
+        return u[:-4].rstrip("/")
+    return u
+
+
 def _parse_sse_stream(response: requests.Response):
     """Yield (event_name, data_obj) from a Cursor run SSE stream."""
     event_name = None
@@ -109,7 +116,9 @@ class SerialLogAgentOnline:
         self.log_file_paths = log_file_paths or {}
 
         self.cursor_api_key = os.environ.get("CURSOR_API_KEY", "").strip()
-        self.cursor_github_repo = os.environ.get("CURSOR_GITHUB_REPO", "").strip()
+        self.cursor_github_repo = _normalize_github_repo_url(
+            os.environ.get("CURSOR_GITHUB_REPO", "").strip()
+        )
         self.cursor_github_ref = os.environ.get("CURSOR_GITHUB_REF", "main").strip() or "main"
         self.cursor_model = os.environ.get("CURSOR_MODEL", "").strip() or None
         # 每个串口一个 Cloud Agent，避免多路并发时同一 agent 409 busy
@@ -122,6 +131,11 @@ class SerialLogAgentOnline:
             if self.cursor_api_key
             else {}
         )
+
+    def _process_log(self, port, line):
+        """将一行日志送入 LSTM 向量缓冲与 LLM 批次文本缓冲。"""
+        self.buffers[port].append(log_to_vector(line))
+        self.llm_buffers[port].append(line)
 
     def _read_logs(self, port, baudrate=921600):
         if self.mode == "serial":

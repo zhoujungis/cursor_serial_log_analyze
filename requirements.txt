@@ -1,10 +1,10 @@
 torch
-# 串口必须用 pyserial；勿执行 pip install serial（另一个同名包会导致无 serial.Serial）
 pyserial>=3.5
 numpy
 requests
-fastapi
-asyncio
-uvicorn
-python-multipart
+flask>=3.0
 python-dotenv
+reportlab
+python-docx
+pypdf
+openpyxl>=3.1
