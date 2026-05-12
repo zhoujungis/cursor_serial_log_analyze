@@ -1,0 +1,227 @@
+=== meta ===
+generated: 2026-05-11T15:46:08
+source: C:\Users\zhouj\Desktop\20260430_C9E31-144-CPU-绑定_194759.log
+parsed_incidents: 4327
+structured_mode: True
+material_truncated: True
+rule_hit_lines: 145
+
+=== Cursor summary ===
+
+材料已截断，以下仅基于已给内容总结。
+
+1) 概要一段
+
+文件 20260430_C9E31-144-CPU-绑定_194759.log 中可见多类异常并发出现：最严重的是两次明确的内核 OOM，均由 LTWP.0 触发 oom-killer，并杀掉 ipc 进程；同时日志中存在大量 WiFi/SDK 主动断开与 BLE 断开记录，时间跨度从 19:50 到 21:31，说明设备连接链路不稳定。另有多轮启动初始化阶段错误反复出现，包括 AMP GIC CPU mask 获取失败、ISP 时钟设置失败、IQ CRC 错误、meta sector 头错误、视频翻转设置失败等，结合多次 0.x 秒内核启动时间戳，疑似存在反复重启或模块反复初始化。20:10 后还出现 Cover cloud parameter has not been set 的连续错误，提示云端/业务参数缺失。整体优先级应先查 OOM 与重启链路，再查 WiFi/BLE 断连，最后处理存储/配置/音视频初始化类错误。
+
+2) 按严重程度归纳（合并同类）
+
+严重级别：严重 / Critical
+- 内核 OOM 两次触发，ipc 进程被杀：
+  - 20:58:41：LTWP.0 invoked oom-killer，Killed process 754 ipc
+  - 21:33:25：LTWP.0 invoked oom-killer，Killed process 754 ipc
+- 影响判断：ipc 为关键系统/业务进程的可能性高，被 OOM 杀掉可能导致通信、业务状态机、绑定流程或后续模块异常。
+
+严重级别：高 / High
+- WiFi/SDK 断连高频发生：
+  - 多次出现 disconnect wifi + gz_api_process_thread wifi disconnect, result: 0
+  - 多次 BLE on disconnect
+- 影响判断：绑定、云连接、心跳、实时音视频或控制通道可能受到影响。
+- 日志中 WiFi/SDK 断开从 19:50:41 持续到 21:31:38 以后，属于持续性问题。
+
+严重级别：高 / High
+- 疑似反复重启或启动流程反复执行：
+  - 多次出现内核启动早期时间戳，如 [0.126xxx]、[0.417xxx]、[0.693xxx]
+  - 启动阶段错误在多个时间点重复出现：19:50、19:51、19:54、20:00、20:08、20:10、20:12、20:13 等
+- 影响判断：如果这些不是合并日志造成的多段启动片段，则设备存在反复重启/复位风险。
+
+严重级别：中 / Medium
+- 存储或元数据读取异常：
+  - read_meta_sector: head error 0xffffffff 多次出现
+  - /dev/mmcblk1p1 挂载参数包含 errors=remount-ro
+- 影响判断：可能导致配置、绑定信息、校准数据或媒体元信息读取失败。
+
+严重级别：中 / Medium
+- 设备配置/校准读取异常：
+  - gz_sysctrl_read_iq_type: crc error 多次出现
+- 影响判断：IQ 参数或相关配置校验失败，可能影响图像质量、ISP 初始化或业务配置加载。
+
+严重级别：中 / Medium
+- AV/ISP 初始化错误：
+  - set clk_core_isp rate 300000000 error
+  - gz_hal_video_set_inversion error 1
+- 影响判断：可能影响图像链路、ISP 时钟配置、画面方向或视频初始化稳定性。
+
+严重级别：中 / Medium
+- 云端业务参数缺失：
+  - Cover cloud parameter has not been set... 在 20:10:57 至 20:12:05 间连续出现
+- 影响判断：对应 Cover cloud 功能不可用或配置下发/读取失败。
+
+严重级别：低 / Low
+- AGORA 日志模块初始化为 err level：
+  - init_all_log_mod: log_mod id=0..24 level=err
+- 影响判断：更像日志等级初始化输出，不一定是实际运行错误；但大量重复出现说明 RTC/Agora 模块多次初始化。
+
+严重级别：低 / Low
+- EROFS DAX 实验特性告警：
+  - erofs: DAX enabled. Warning: EXPERIMENTAL
+- 影响判断：风险提示类日志，暂未见直接故障证据。
+
+3) Bug 清单
+
+【Bug编号】 BUG-001
+【标题】 内核 OOM 导致 ipc 进程被杀
+【严重级别】 严重
+【类型】 内存/OOM/系统稳定性
+【时间】 2026-04-30 20:58:41；2026-04-30 21:33:25
+【证据/原文】 
+行 351651: [2026-04-30 20:58:41.010] [   13.596977] LTWP.0 invoked oom-killer: gfp_mask=0x1100cca(GFP_HIGHUSER_MOVABLE), order=0, oom_score_adj=0
+行 351697: [2026-04-30 20:58:41.112] [   13.628031] Out of memory: Killed process 754 (ipc) total-vm:242588kB, anon-rss:5808kB, file-rss:2100kB, shmem-rss:0kB, UID:0 pgtables:236kB oom_score_adj:0
+行 537022: [2026-04-30 21:33:25.429] [    9.454290] LTWP.0 invoked oom-killer: gfp_mask=0x1100cca(GFP_HIGHUSER_MOVABLE), order=0, oom_score_adj=0
+行 537067: [2026-04-30 21:33:25.482] [    9.484348] Out of memory: Killed process 754 (ipc) total-vm:243264kB, anon-rss:7140kB, file-rss:2100kB, shmem-rss:56kB, UID:0 pgtables:238kB oom_score_adj:0
+【分析结论】 设备出现明确内存耗尽并触发 oom-killer，ipc 进程被杀。该问题优先级最高，可能直接导致绑定、通信、进程间消息、WiFi 控制或业务状态异常。
+
+【Bug编号】 BUG-002
+【标题】 WiFi/SDK 连接频繁断开，伴随 BLE 断连
+【严重级别】 高
+【类型】 网络连接/无线链路稳定性
+【时间】 2026-04-30 19:50:41 至 2026-04-30 21:31:38，材料内多次出现
+【证据/原文】
+行 7737: [2026-04-30 19:50:41.239] 01-01 12:03:03.607 [SDK]: disconnect wifi +++++++++
+行 7740: [2026-04-30 19:50:41.239] 01-01 12:03:03.611 [SDK]: gz_api_process_thread wifi disconnect, result: 0
+行 27092: [2026-04-30 19:55:29.315] 01-01 12:00:36.622 [ble] on disconnect
+行 69939: [2026-04-30 20:08:03.579] 04-30 20:08:04.061 [ble] on disconnect
+行 85163: [2026-04-30 20:10:55.138] 04-30 20:10:55.974 [SDK]: disconnect wifi +++++++++
+行 85165: [2026-04-30 20:10:55.138] 04-30 20:10:55.975 [SDK]: gz_api_process_thread wifi disconnect, result: 0
+行 528844: [2026-04-30 21:31:38.729] 04-30 21:31:39.978 [SDK]: disconnect wifi +++++++++
+行 528846: [2026-04-30 21:31:38.729] 04-30 21:31:39.979 [SDK]: gz_api_process_thread wifi disconnect, result: 0
+【分析结论】 WiFi 断开不是单点事件，而是长时间周期性/反复发生，并夹杂 BLE 断连。需确认是主动断开策略、绑定流程触发、WiFi 驱动异常、路由/AP 兼容性，还是系统重启/进程异常导致连接被重置。
+
+【Bug编号】 BUG-003
+【标题】 日志显示多轮启动早期错误，疑似设备反复重启或模块反复初始化
+【严重级别】 高
+【类型】 系统稳定性/启动流程异常
+【时间】 2026-04-30 19:50:44 起，多次重复到 20:13:xx
+【证据/原文】
+[2026-04-30 19:50:44.040] [    0.126766] rockchip_amp_get_gic_info: get amp gic cpu mask error
+[2026-04-30 19:51:54.115] [    0.127017] rockchip_amp_get_gic_info: get amp gic cpu mask error
+[2026-04-30 20:00:16.825] [    0.126918] rockchip_amp_get_gic_info: get amp gic cpu mask error
+[2026-04-30 20:08:46.270] [    0.126941] rockchip_amp_get_gic_info: get amp gic cpu mask error
+[2026-04-30 20:10:52.480] [    0.126664] rockchip_amp_get_gic_info: get amp gic cpu mask error
+[2026-04-30 20:13:08.780] [    0.126634] rockchip_amp_get_gic_info: get amp gic cpu mask error
+【分析结论】 同类内核早期启动时间戳和启动错误在不同外层时间反复出现，疑似设备多次重启、日志拼接了多段启动，或关键模块反复重新初始化。需结合完整串口上下文确认是否存在 watchdog、panic、掉电复位或用户态拉起重启。
+
+【Bug编号】 BUG-004
+【标题】 meta sector 读取失败，疑似存储/元数据异常
+【严重级别】 中
+【类型】 存储/文件系统/元数据读取
+【时间】 2026-04-30 19:50:46 起多次出现
+【证据/原文】
+[2026-04-30 19:50:46.103] read_meta_sector: head error 0xffffffff !
+[2026-04-30 19:50:46.800] read_meta_sector: head error 0xffffffff !
+[2026-04-30 19:51:56.181] read_meta_sector: head error 0xffffffff !
+[2026-04-30 19:54:55.110] read_meta_sector: head error 0xffffffff !
+[2026-04-30 19:59:33.466] read_meta_sector: head error 0xffffffff !
+【分析结论】 多次读取 meta sector 失败，头部为 0xffffffff，可能表示未写入、擦除态、分区偏移错误、介质读取异常或数据损坏。该问题可能与配置读取、绑定信息、业务元数据丢失有关。
+
+【Bug编号】 BUG-005
+【标题】 IQ 类型读取 CRC 校验失败
+【严重级别】 中
+【类型】 配置/校准数据/CRC 校验
+【时间】 2026-04-30 19:50:45 起多次出现
+【证据/原文】
+[2026-04-30 19:50:45.623] gz_sysctrl_read_iq_type: crc error !
+[2026-04-30 19:50:46.474] gz_sysctrl_read_iq_type: crc error !
+[2026-04-30 20:08:47.881] gz_sysctrl_read_iq_type: crc error !
+[2026-04-30 20:10:54.998] gz_sysctrl_read_iq_type: crc error !
+[2026-04-30 20:12:47.279] gz_sysctrl_read_iq_type: crc error !
+【分析结论】 IQ 配置或校准数据存在 CRC 校验失败，可能是配置区损坏、版本不匹配、烧录异常或读取路径错误。需确认是否影响 ISP 参数加载、画质、视频初始化及后续 AV 错误。
+
+【Bug编号】 BUG-006
+【标题】 ISP 时钟设置失败及视频翻转设置失败
+【严重级别】 中
+【类型】 AV/ISP/视频初始化
+【时间】 2026-04-30 19:50:44 起多次出现
+【证据/原文】
+[2026-04-30 19:50:44.494] [    0.692419] set clk_core_isp rate 300000000 error
+[2026-04-30 19:50:46.798] [01-01 12:00:03.074 AV]: gz_hal_video_set_inversion error 1
+[2026-04-30 20:08:46.751] [    0.693390] set clk_core_isp rate 300000000 error
+[2026-04-30 20:10:55.192] [04-30 20:10:56.017 AV]: gz_hal_video_set_inversion error 1
+[2026-04-30 20:12:47.482] [04-30 20:12:48.047 AV]: gz_hal_video_set_inversion error 1
+【分析结论】 ISP 时钟配置失败与视频翻转设置失败多次出现，可能导致视频链路初始化不完整、画面方向设置失败或图像处理异常。需结合 IQ CRC 错误和 sensor/ISP 驱动初始化顺序一起排查。
+
+【Bug编号】 BUG-007
+【标题】 Cover cloud 参数未设置导致业务错误反复打印
+【严重级别】 中
+【类型】 云端参数/业务配置缺失
+【时间】 2026-04-30 20:10:57 至 2026-04-30 20:12:05
+【证据/原文】
+[2026-04-30 20:10:57.563] [04-30 20:10:58.408 SDK][ERROR ] Cover cloud parameter has not been set...
+[2026-04-30 20:11:00.096] [04-30 20:11:00.941 SDK][ERROR ] Cover cloud parameter has not been set...
+[2026-04-30 20:11:31.314] [04-30 20:11:32.159 SDK][ERROR ] Cover cloud parameter has not been set...
+[2026-04-30 20:12:01.329] [04-30 20:12:02.151 SDK][ERROR ] Cover cloud parameter has not been set...
+[2026-04-30 20:12:05.217] [04-30 20:12:06.043 SDK][ERROR ] Cover cloud parameter has not been set...
+【分析结论】 设备业务层反复报 Cover cloud 参数未设置，说明云端配置、绑定参数、能力参数或本地持久化参数缺失。可能是绑定流程未完成、云配置未下发、存储读取失败或重启后参数丢失。
+
+【Bug编号】 BUG-008
+【标题】 AMP GIC CPU mask 获取失败
+【严重级别】 中
+【类型】 内核/平台初始化
+【时间】 多次启动早期出现
+【证据/原文】
+[2026-04-30 19:50:44.040] [    0.126766] rockchip_amp_get_gic_info: get amp gic cpu mask error
+[2026-04-30 20:00:16.825] [    0.126918] rockchip_amp_get_gic_info: get amp gic cpu mask error
+[2026-04-30 20:12:44.756] [    0.126929] rockchip_amp_get_gic_info: get amp gic cpu mask error
+【分析结论】 Rockchip AMP/GIC 相关初始化失败，若系统未启用 AMP 可能只是配置残留；若依赖多核/协处理器通信，则可能影响底层中断或异构通信能力。需确认 DTS、内核配置和实际产品功能是否匹配。
+
+【Bug编号】 BUG-009
+【标题】 shell 写入参数失败 Invalid argument
+【严重级别】 中
+【类型】 启动脚本/系统参数配置
+【时间】 多次启动阶段出现
+【证据/原文】
+[2026-04-30 19:50:44.505] sh: write error: Invalid argument
+[2026-04-30 19:51:54.578] sh: write error: Invalid argument
+[2026-04-30 20:08:46.761] sh: write error: Invalid argument
+[2026-04-30 20:12:45.238] sh: write error: Invalid argument
+【分析结论】 启动脚本或初始化命令向 sysfs/procfs 写入了无效参数。需定位具体脚本和写入节点，否则可能造成时钟、驱动参数、调度或内存参数未按预期配置。
+
+【Bug编号】 BUG-010
+【标题】 AGORA 模块反复初始化，日志等级设置为 err
+【严重级别】 低
+【类型】 RTC/日志配置/噪声
+【时间】 2026-04-30 19:59:32、20:08:02、20:10:04、20:12:04、20:12:27、20:12:47 等
+【证据/原文】
+[2026-04-30 19:59:32.260] [AGORA][2026-04-30 19:59:33.123][crt][init_all_log_mod:137] log_mod: id= 1 level=err name=api
+[2026-04-30 20:08:02.762] [AGORA][2026-04-30 20:08:03.227][crt][init_all_log_mod:137] log_mod: id= 2 level=err name=user
+[2026-04-30 20:12:04.402] [AGORA][2026-04-30 20:12:05.232][crt][init_all_log_mod:137] log_mod: id= 3 level=err name=net
+【分析结论】 这些更像 AGORA 日志模块初始化输出，不宜直接判定为运行错误。但其反复出现可能侧面说明 RTC/音视频业务或进程被多次重新初始化，建议与 WiFi 断连、重启/OOM 时间线关联排查。
+
+【Bug编号】 BUG-011
+【标题】 EROFS DAX 实验特性告警
+【严重级别】 低
+【类型】 文件系统配置/告警
+【时间】 多次启动阶段出现
+【证据/原文】
+[2026-04-30 19:50:44.218] [    0.417491] erofs: DAX enabled. Warning: EXPERIMENTAL, use at your own risk
+[2026-04-30 20:00:17.023] [    0.418764] erofs: DAX enabled. Warning: EXPERIMENTAL, use at your own risk
+[2026-04-30 20:12:44.952] [    0.418644] erofs: DAX enabled. Warning: EXPERIMENTAL, use at your own risk
+【分析结论】 当前仅体现为实验特性风险提示，未见直接故障证据。若稳定性问题集中在文件系统或内存映射访问，可进一步评估是否关闭 DAX 或回退配置。
+
+4) 后续排查顺序
+
+1. 先排查 OOM：确认 LTWP.0、ipc 的职责，采集 OOM 前后的内存水位、进程 RSS/PSS、slab、ion/cma、视频/NPU/Agora 内存占用，判断是内存泄漏、峰值过高还是启动内存预算不足。
+
+2. 核对是否发生反复重启：围绕多次 [0.xxx] 内核启动时间戳，查找 boot banner、watchdog、panic、reboot reason、电源复位原因，确认是整机重启、应用重启，还是日志文件拼接了多段启动。
+
+3. 将 WiFi/BLE 断连与重启/OOM 时间线对齐：判断断连是 OOM/重启的结果，还是网络模块异常导致业务重启；重点查看 disconnect wifi 前后的调用来源、状态机、错误码、RSSI/AP 状态和绑定流程动作。
+
+4. 排查存储与配置区：针对 read_meta_sector head error 0xffffffff、gz_sysctrl_read_iq_type crc error，检查分区表、meta/IQ 数据烧录、版本兼容、CRC 生成逻辑、掉电保护，以及是否存在读错分区或空白分区。
+
+5. 排查 AV/ISP 初始化链路：结合 set clk_core_isp rate error、gz_hal_video_set_inversion error 1、IQ CRC 错误，确认 sensor/ISP 驱动、clock tree、DTS 配置、启动脚本写 sysfs 参数是否一致。
+
+6. 定位 sh: write error: Invalid argument 的具体写入命令：在启动脚本中打开命令回显或增加节点名日志，找出哪个 sysfs/procfs 参数非法。
+
+7. 排查 Cover cloud 参数来源：确认参数应由绑定流程、云端下发还是本地持久化提供；检查参数未设置是否与 WiFi 断连、meta 读取失败、进程重启有关。
+
+8. 降低日志噪声并复测：AGORA init_all_log_mod、EROF DAX warning 等先作为低优先级噪声处理，复测时保留关键模块日志，避免高频重复日志掩盖 OOM/断连前因。

@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>串口日志分析</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f1f5f9;--card:#fff;--fg:#1e293b;--muted:#64748b;
+  --accent:#3b82f6;--accent-dark:#2563eb;--border:#cbd5e1;
+  --radius:8px;--shadow:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+}
+html{font-size:14px}
+body{font-family:"Microsoft YaHei UI","PingFang SC","Helvetica Neue",Arial,sans-serif;
+  background:var(--bg);color:var(--fg);min-height:100vh;display:flex;flex-direction:column}
+
+/* ── Navbar ── */
+.navbar{background:var(--card);border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 20px;height:48px;gap:6px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04);position:sticky;top:0;z-index:50}
+.navbar .brand{font-weight:700;font-size:1.05rem;color:var(--accent);margin-right:16px;
+  display:flex;align-items:center;gap:6px;white-space:nowrap}
+.navbar .brand svg{width:20px;height:20px}
+.nav-btn{background:none;border:none;padding:6px 12px;font-size:.875rem;color:var(--fg);
+  cursor:pointer;border-radius:6px;transition:background .15s}
+.nav-btn:hover{background:#e2e8f0}
+
+/* ── Main ── */
+.main{flex:1;max-width:900px;width:100%;margin:0 auto;padding:20px 16px;display:flex;flex-direction:column;gap:16px}
+
+/* ── Cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);
+  padding:16px;box-shadow:var(--shadow)}
+.card-title{font-size:.8rem;font-weight:700;color:var(--accent);text-transform:uppercase;
+  letter-spacing:.03em;margin-bottom:10px}
+
+/* File picker */
+.file-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.file-row .path{flex:1;min-width:200px;font-size:.85rem;color:var(--muted);word-break:break-all}
+.file-row .path.has-file{color:var(--fg)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 16px;font-size:.875rem;
+  font-weight:600;border:none;border-radius:6px;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent-dark)}
+.btn-primary:disabled{background:#94a3b8;cursor:not-allowed}
+.btn-secondary{background:#f1f5f9;color:var(--fg);border:1px solid var(--border)}
+.btn-secondary:hover{background:#e2e8f0}
+.btn-danger{background:#ef4444;color:#fff}
+.btn-danger:hover{background:#dc2626}
+.btn-sm{padding:5px 10px;font-size:.8rem}
+.btn svg{width:16px;height:16px}
+
+/* Result area */
+.result-area{flex:1;min-height:280px;display:flex;flex-direction:column}
+.result-box{flex:1;min-height:220px;max-height:60vh;overflow-y:auto;
+  background:#fafbfc;border:1px solid var(--border);border-radius:6px;
+  padding:12px;font-size:.82rem;line-height:1.65;white-space:pre-wrap;
+  word-break:break-word;font-family:"Cascadia Mono","Consolas","Microsoft YaHei UI",monospace}
+.result-box:empty::before{content:"分析结果将显示在此处";color:var(--muted);font-style:italic}
+
+/* Progress */
+.progress-wrap{margin-top:12px}
+.progress-bar-outer{height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden}
+.progress-bar-inner{height:100%;background:var(--accent);border-radius:3px;width:0;
+  transition:width .3s ease}
+.status-text{font-size:.78rem;color:var(--muted);margin-top:6px;min-height:1.2em}
+
+/* Actions row */
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+
+/* ── Modal ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;
+  align-items:center;justify-content:center;z-index:100;backdrop-filter:blur(2px)}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.18);
+  width:92%;max-height:88vh;overflow:hidden;display:flex;flex-direction:column}
+.modal-sm{max-width:480px}
+.modal-md{max-width:640px}
+.modal-lg{max-width:820px}
+.modal-header{display:flex;align-items:center;justify-content:space-between;
+  padding:16px 20px;border-bottom:1px solid var(--border)}
+.modal-header h3{font-size:1rem;font-weight:700}
+.modal-close{background:none;border:none;cursor:pointer;color:var(--muted);
+  padding:4px;border-radius:4px;display:flex}
+.modal-close:hover{background:#e2e8f0;color:var(--fg)}
+.modal-body{padding:20px;overflow-y:auto;flex:1}
+.modal-footer{padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end}
+
+/* Forms */
+.form-group{margin-bottom:14px}
+.form-group label{display:block;font-size:.82rem;font-weight:600;color:var(--fg);margin-bottom:4px}
+.form-group .hint{font-size:.75rem;color:var(--muted);margin-top:2px}
+input[type=text],input[type=password],input[type=number],textarea,select{
+  width:100%;padding:8px 10px;font-size:.85rem;border:1px solid var(--border);
+  border-radius:6px;background:#fff;color:var(--fg);font-family:inherit;transition:border-color .15s}
+input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(59,130,246,.12)}
+textarea{resize:vertical;min-height:60px}
+
+/* Tabs */
+.tabs{display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:16px}
+.tab-btn{background:none;border:none;padding:8px 16px;font-size:.85rem;font-weight:600;
+  color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .15s}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-btn:hover{color:var(--fg)}
+.tab-pane{display:none}
+.tab-pane.active{display:block}
+
+/* Rules table */
+.rules-table{width:100%;border-collapse:collapse;font-size:.8rem}
+.rules-table th{background:#f8fafc;font-weight:700;text-align:left;padding:8px 10px;
+  border-bottom:2px solid var(--border);color:#475569;font-size:.75rem;text-transform:uppercase;letter-spacing:.03em}
+.rules-table td{padding:7px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.rules-table tr:hover td{background:#f8fafc}
+.rules-table tr.selected td{background:#dbeafe}
+.rules-table .src-badge{display:inline-block;padding:1px 8px;border-radius:9999px;
+  font-size:.7rem;font-weight:600}
+.src-badge.builtin{background:#f0fdf4;color:#15803d}
+.src-badge.custom{background:#eff6ff;color:#2563eb}
+.rules-table .pattern-cell{max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:"Cascadia Mono","Consolas",monospace;font-size:.75rem}
+
+/* Upload zone */
+.upload-zone{border:2px dashed var(--border);border-radius:8px;padding:24px;text-align:center;
+  cursor:pointer;transition:border-color .2s,background .2s;color:var(--muted)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:#eff6ff}
+.upload-zone input{display:none}
+
+/* Spinner */
+.spinner{display:inline-block;width:16px;height:16px;border:2px solid #e2e8f0;
+  border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Toast */
+.toast-container{position:fixed;top:60px;right:20px;z-index:200;display:flex;flex-direction:column;gap:8px}
+.toast{padding:10px 16px;border-radius:8px;color:#fff;font-size:.85rem;font-weight:500;
+  box-shadow:0 4px 12px rgba(0,0,0,.15);animation:slideIn .3s ease;max-width:360px}
+.toast.success{background:#16a34a}.toast.error{background:#dc2626}.toast.info{background:#2563eb}
+@keyframes slideIn{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:translateX(0)}}
+
+/* Responsive */
+@media(max-width:640px){
+  .main{padding:12px 8px}
+  .modal{width:98%}
+  .navbar{padding:0 10px}
+}
+</style>
+</head>
+<body>
+
+<!-- Navbar -->
+<nav class="navbar">
+  <div class="brand">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
+    串口日志分析
+  </div>
+  <button class="nav-btn" onclick="openModal('settingsModal')">设置</button>
+  <button class="nav-btn" onclick="openModal('rulesModal');loadRules()">规则</button>
+  <button class="nav-btn" onclick="openModal('bugsModal');loadBugs()">Bug记录</button>
+  <button class="nav-btn" onclick="openModal('disclaimerModal')">免责声明</button>
+  <button class="nav-btn" onclick="openModal('aboutModal');loadAbout()">关于</button>
+</nav>
+
+<!-- Main Content -->
+<div class="main">
+  <!-- File Card -->
+  <div class="card">
+    <div class="card-title">当前文件</div>
+    <div class="file-row">
+      <button class="btn btn-secondary" onclick="$id('logFileInput').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        选择文件…
+      </button>
+      <input type="file" id="logFileInput" accept=".log,.txt,.pdf,*" onchange="onFilePicked(this)" style="display:none">
+      <span class="path" id="filePath">未选择文件</span>
+    </div>
+  </div>
+
+  <!-- Result Card -->
+  <div class="card result-area">
+    <div class="card-title">分析结果</div>
+    <div class="result-box" id="resultBox"></div>
+    <div class="actions">
+      <button class="btn btn-primary" id="btnAnalyze" onclick="startAnalysis()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5,3 19,12 5,21 5,3"/></svg>
+        开始分析
+      </button>
+      <button class="btn btn-secondary" onclick="downloadResult()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7,10 12,15 17,10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        保存 TXT
+      </button>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBar"></div></div>
+      <div class="status-text" id="statusText">就绪</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Settings Modal ═══ -->
+<div class="modal-overlay" id="settingsModal">
+<div class="modal modal-md">
+  <div class="modal-header"><h3>设置</h3><button class="modal-close" onclick="closeModal('settingsModal')">✕</button></div>
+  <div class="modal-body">
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="tabApi">Cursor API</button>
+      <button class="tab-btn" data-tab="tabClean">清洗与材料</button>
+    </div>
+    <!-- Tab: API -->
+    <div class="tab-pane active" id="tabApi">
+      <div class="form-group">
+        <label>API Key（Dashboard → Integrations）</label>
+        <input type="password" id="cfgApiKey">
+      </div>
+      <div class="form-group">
+        <label>GitHub 仓库 URL（可克隆）</label>
+        <input type="text" id="cfgRepo">
+      </div>
+      <div class="form-group">
+        <label>分支 / ref（默认 main）</label>
+        <input type="text" id="cfgRef" placeholder="main">
+      </div>
+      <div class="form-group">
+        <label>模型 ID（可选，留空则用账号默认）</label>
+        <input type="text" id="cfgModel">
+      </div>
+      <div class="form-group"><p class="hint">保存后写入项目 .env，下次「开始分析」后生效。</p></div>
+    </div>
+    <!-- Tab: Clean -->
+    <div class="tab-pane" id="tabClean">
+      <div class="form-group">
+        <label>分析侧重点（可选）</label>
+        <textarea id="cfgNotes" rows="3" placeholder="例如：关注内存泄漏与网络超时"></textarea>
+      </div>
+      <div class="form-group">
+        <label>Cloud 清洗 prompt 前缀</label>
+        <textarea id="cfgCleanPrompt" rows="5"></textarea>
+      </div>
+      <div class="form-group">
+        <label>CURSOR_SUMMARY_MAX_CHARS</label>
+        <input type="number" id="cfgSummaryChars" placeholder="90000">
+        <p class="hint">建议 4000～240000</p>
+      </div>
+      <div class="form-group">
+        <label>CURSOR_CLEAN_MAX_CHARS</label>
+        <input type="number" id="cfgCleanChars" placeholder="24000">
+        <p class="hint">建议 1000～80000</p>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal('settingsModal')">取消</button>
+    <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+  </div>
+</div></div>
+
+<!-- ═══ Rules Modal ═══ -->
+<div class="modal-overlay" id="rulesModal">
+<div class="modal modal-lg">
+  <div class="modal-header"><h3>串口匹配规则</h3><button class="modal-close" onclick="closeModal('rulesModal')">✕</button></div>
+  <div class="modal-body">
+    <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="openModal('addRuleModal')">+ 添加规则</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteSelectedRule()">删除选中</button>
+      <button class="btn btn-secondary btn-sm" onclick="openModal('importRulesModal')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        从 Excel/CSV 导入
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="loadRules()">刷新</button>
+    </div>
+    <div style="overflow-x:auto">
+      <table class="rules-table">
+        <thead><tr><th>来源</th><th>优先级</th><th>Category</th><th>显示名</th><th>Pattern</th></tr></thead>
+        <tbody id="rulesBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('rulesModal')">关闭</button></div>
+</div></div>
+
+<!-- ═══ Add Rule Modal ═══ -->
+<div class="modal-overlay" id="addRuleModal">
+<div class="modal modal-sm">
+  <div class="modal-header"><h3>添加自定义规则</h3><button class="modal-close" onclick="closeModal('addRuleModal')">✕</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>优先级（数字越小越优先）</label><input type="number" id="newPriority" value="5"></div>
+    <div class="form-group"><label>Category（唯一键）</label><input type="text" id="newCategory" placeholder="如 mqtt_err"></div>
+    <div class="form-group"><label>显示名</label><input type="text" id="newLabel" placeholder="如 MQTT通信失败"></div>
+    <div class="form-group"><label>Pattern（正则）</label><input type="text" id="newPattern" placeholder="(?i)mqtt.*(fail|error)"></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal('addRuleModal')">取消</button>
+    <button class="btn btn-primary" onclick="addRule()">确定</button>
+  </div>
+</div></div>
+
+<!-- ═══ Import Rules Modal ═══ -->
+<div class="modal-overlay" id="importRulesModal">
+<div class="modal modal-sm">
+  <div class="modal-header"><h3>从 Excel/CSV 导入规则</h3><button class="modal-close" onclick="closeModal('importRulesModal')">✕</button></div>
+  <div class="modal-body">
+    <div class="upload-zone" id="importZone" onclick="$id('importFileInput').click()"
+         ondragover="event.preventDefault();this.classList.add('drag')"
+         ondragleave="this.classList.remove('drag')"
+         ondrop="event.preventDefault();this.classList.remove('drag');onImportDrop(event)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36" style="margin:0 auto 8px;display:block;opacity:.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      点击或拖拽 .xlsx / .csv 文件到此处
+      <input type="file" id="importFileInput" accept=".xlsx,.xlsm,.csv" onchange="onImportFilePicked(this)">
+    </div>
+    <div id="importFileName" style="margin-top:8px;font-size:.82rem;color:var(--muted)"></div>
+    <div id="importStatus" style="margin-top:12px;font-size:.85rem;display:none">
+      <span class="spinner"></span> <span id="importStatusText">正在调用 Cursor 提取规则…</span>
+    </div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal('importRulesModal')">取消</button>
+    <button class="btn btn-primary" id="btnImport" onclick="importRules()" disabled>开始导入</button>
+  </div>
+</div></div>
+
+<!-- ═══ Bug Records Modal ═══ -->
+<div class="modal-overlay" id="bugsModal">
+<div class="modal modal-lg" style="max-width:960px">
+  <div class="modal-header"><h3>Bug 记录（PostgreSQL）</h3><button class="modal-close" onclick="closeModal('bugsModal')">✕</button></div>
+  <div class="modal-body" style="padding:12px 20px">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <label style="font-size:.82rem;font-weight:600">筛选：</label>
+      <select id="bugFilter" onchange="loadBugs()" style="width:100px;padding:5px 8px;font-size:.82rem;border:1px solid var(--border);border-radius:6px">
+        <option>全部</option><option>待定</option><option>确认</option><option>误报</option><option>忽略</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="loadBugs()">刷新</button>
+      <button class="btn btn-secondary btn-sm" onclick="testDbConnection()">测试连接</button>
+      <span id="bugStats" style="margin-left:auto;font-size:.78rem;color:var(--muted)"></span>
+    </div>
+    <div style="overflow-x:auto;max-height:320px;overflow-y:auto">
+      <table class="rules-table" id="bugsTable">
+        <thead><tr><th>ID</th><th>Bug编号</th><th>标题</th><th>严重级别</th><th>来源文件</th><th>判别</th></tr></thead>
+        <tbody id="bugsBody"></tbody>
+      </table>
+    </div>
+    <!-- Review panel -->
+    <div style="margin-top:14px;padding:12px;background:#f8fafc;border:1px solid var(--border);border-radius:8px">
+      <div style="font-size:.82rem;font-weight:700;margin-bottom:8px;color:var(--accent)">审核选中 Bug</div>
+      <div id="bugDetail" style="font-size:.82rem;color:var(--muted);margin-bottom:10px;line-height:1.6;white-space:pre-wrap;max-height:100px;overflow-y:auto">选中一行查看详情</div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label style="font-size:.82rem;font-weight:600">判别：</label>
+        <select id="bugVerdict" style="width:90px;padding:5px 8px;font-size:.82rem;border:1px solid var(--border);border-radius:6px">
+          <option>待定</option><option>确认</option><option>误报</option><option>忽略</option>
+        </select>
+        <label style="font-size:.82rem;font-weight:600">备注：</label>
+        <input type="text" id="bugNotes" style="flex:1;min-width:160px;padding:5px 8px;font-size:.82rem" placeholder="可选备注">
+        <button class="btn btn-primary btn-sm" onclick="saveVerdict()">保存判别</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteBugRecord()">删除</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('bugsModal')">关闭</button></div>
+</div></div>
+
+<!-- ═══ Disclaimer Modal ═══ -->
+<div class="modal-overlay" id="disclaimerModal">
+<div class="modal modal-sm">
+  <div class="modal-header"><h3>免责声明</h3><button class="modal-close" onclick="closeModal('disclaimerModal')">✕</button></div>
+  <div class="modal-body" style="line-height:1.8;font-size:.9rem">
+    本次分析结果只对本次导入的串口 log 有效；<br>具体结果需由测试人员复现、验证后再作结论。
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('disclaimerModal')">确定</button></div>
+</div></div>
+
+<!-- ═══ About Modal ═══ -->
+<div class="modal-overlay" id="aboutModal">
+<div class="modal modal-sm">
+  <div class="modal-header"><h3>关于</h3><button class="modal-close" onclick="closeModal('aboutModal')">✕</button></div>
+  <div class="modal-body" id="aboutBody" style="text-align:center;padding:28px 20px">
+    <div style="font-size:2.2rem;margin-bottom:8px">📋</div>
+    <div style="font-weight:700;font-size:1.1rem;margin-bottom:4px">串口日志分析</div>
+    <div id="aboutVersion" style="color:var(--muted);font-size:.85rem"></div>
+    <div id="aboutAuthor" style="color:var(--muted);font-size:.85rem;margin-top:2px"></div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('aboutModal')">确定</button></div>
+</div></div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+/* ── Helpers ── */
+const $id = id => document.getElementById(id);
+const $q = s => document.querySelectorAll(s);
+
+function toast(msg, type='info', ms=3500) {
+  const c = $id('toasts'), d = document.createElement('div');
+  d.className = 'toast ' + type; d.textContent = msg;
+  c.appendChild(d);
+  setTimeout(() => { d.style.opacity = '0'; d.style.transition = 'opacity .3s'; setTimeout(() => d.remove(), 300); }, ms);
+}
+
+/* ── Modal ── */
+function openModal(id) { $id(id).classList.add('open'); }
+function closeModal(id) { $id(id).classList.remove('open'); }
+document.addEventListener('click', e => {
+  if (e.target.classList.contains('modal-overlay')) e.target.classList.remove('open');
+});
+
+/* ── Tabs ── */
+document.addEventListener('click', e => {
+  if (!e.target.classList.contains('tab-btn')) return;
+  const pane = e.target.dataset.tab;
+  const parent = e.target.closest('.modal-body') || e.target.closest('.card');
+  parent.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b === e.target));
+  parent.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === pane));
+});
+
+/* ── File picker ── */
+let currentFile = null;
+function onFilePicked(input) {
+  if (!input.files.length) return;
+  currentFile = input.files[0];
+  $id('filePath').textContent = currentFile.name;
+  $id('filePath').classList.add('has-file');
+}
+
+/* ── Config ── */
+async function loadConfig() {
+  try {
+    const r = await fetch('/api/config'); const d = await r.json();
+    $id('cfgRepo').value = d.CURSOR_GITHUB_REPO || '';
+    $id('cfgRef').value = d.CURSOR_GITHUB_REF || '';
+    $id('cfgModel').value = d.CURSOR_MODEL || '';
+    $id('cfgSummaryChars').value = d.CURSOR_SUMMARY_MAX_CHARS || '';
+    $id('cfgCleanChars').value = d.CURSOR_CLEAN_MAX_CHARS || '';
+    const maskedKey = d.CURSOR_API_KEY || '';
+    $id('cfgApiKey').value = maskedKey;
+    $id('cfgApiKey').placeholder = maskedKey ? '已配置，点击可修改' : '未配置';
+  } catch(e) { console.error(e); }
+}
+
+async function saveSettings() {
+  const data = {};
+  const key = $id('cfgApiKey').value.trim();
+  if (key && !key.includes('****')) data.CURSOR_API_KEY = key;
+  const repo = $id('cfgRepo').value.trim(); if (repo) data.CURSOR_GITHUB_REPO = repo;
+  data.CURSOR_GITHUB_REF = $id('cfgRef').value.trim();
+  data.CURSOR_MODEL = $id('cfgModel').value.trim();
+  const sc = $id('cfgSummaryChars').value.trim(); if (sc) data.CURSOR_SUMMARY_MAX_CHARS = sc;
+  const cc = $id('cfgCleanChars').value.trim(); if (cc) data.CURSOR_CLEAN_MAX_CHARS = cc;
+  try {
+    const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+    const d = await r.json();
+    if (d.ok) { toast('配置已保存到 .env', 'success'); closeModal('settingsModal'); }
+    else toast(d.error || '保存失败', 'error');
+  } catch(e) { toast('请求失败: ' + e.message, 'error'); }
+}
+
+/* ── Rules ── */
+let rulesData = [], selectedRuleIdx = -1, builtinCount = 0;
+
+async function loadRules() {
+  try {
+    const r = await fetch('/api/rules'); const d = await r.json();
+    rulesData = d.rules; builtinCount = d.builtin_count;
+    renderRules();
+  } catch(e) { toast('加载规则失败', 'error'); }
+}
+
+function renderRules() {
+  const tbody = $id('rulesBody'); tbody.innerHTML = '';
+  selectedRuleIdx = -1;
+  rulesData.forEach((r, i) => {
+    const tr = document.createElement('tr');
+    tr.onclick = () => selectRule(i, tr);
+    const isBuiltin = r.source === '内置';
+    tr.innerHTML =
+      `<td><span class="src-badge ${isBuiltin?'builtin':'custom'}">${r.source}</span></td>` +
+      `<td>${r.priority}</td><td>${esc(r.category)}</td><td>${esc(r.label)}</td>` +
+      `<td class="pattern-cell" title="${esc(r.pattern)}">${esc(r.pattern)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function selectRule(i, tr) {
+  $q('#rulesBody tr').forEach(r => r.classList.remove('selected'));
+  tr.classList.add('selected');
+  selectedRuleIdx = i;
+}
+
+async function deleteSelectedRule() {
+  if (selectedRuleIdx < 0) { toast('请先选中一行', 'info'); return; }
+  const r = rulesData[selectedRuleIdx];
+  if (r.source === '内置') { toast('只能删除自定义规则', 'info'); return; }
+  const userIdx = selectedRuleIdx - builtinCount;
+  try {
+    const res = await fetch('/api/rules/' + userIdx, { method:'DELETE' });
+    const d = await res.json();
+    if (d.ok) { toast('已删除 ' + d.removed, 'success'); loadRules(); }
+    else toast(d.error, 'error');
+  } catch(e) { toast('删除失败', 'error'); }
+}
+
+async function addRule() {
+  const data = {
+    priority: parseInt($id('newPriority').value) || 5,
+    category: $id('newCategory').value.trim(),
+    label: $id('newLabel').value.trim(),
+    pattern: $id('newPattern').value.trim(),
+  };
+  if (!data.category || !data.pattern) { toast('请填写 category 与 pattern', 'info'); return; }
+  try {
+    const r = await fetch('/api/rules', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
+    const d = await r.json();
+    if (d.ok) {
+      toast('规则已添加', 'success'); closeModal('addRuleModal');
+      ['newPriority','newCategory','newLabel','newPattern'].forEach(id => $id(id).value = id==='newPriority'?'5':'');
+      loadRules();
+    } else toast(d.error, 'error');
+  } catch(e) { toast('请求失败', 'error'); }
+}
+
+/* ── Import rules ── */
+let importFile = null;
+function onImportFilePicked(input) {
+  if (!input.files.length) return;
+  importFile = input.files[0];
+  $id('importFileName').textContent = '已选：' + importFile.name;
+  $id('btnImport').disabled = false;
+}
+function onImportDrop(e) {
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  importFile = f;
+  $id('importFileName').textContent = '已选：' + importFile.name;
+  $id('btnImport').disabled = false;
+}
+
+async function importRules() {
+  if (!importFile) return;
+  $id('importStatus').style.display = 'flex';
+  $id('importStatusText').textContent = '正在调用 Cursor 提取规则（可能需要 1～2 分钟）…';
+  $id('btnImport').disabled = true;
+  const fd = new FormData(); fd.append('file', importFile);
+  try {
+    const r = await fetch('/api/rules/import', { method:'POST', body:fd });
+    const d = await r.json();
+    $id('importStatus').style.display = 'none';
+    if (d.ok) {
+      toast(`已导入 ${d.added} 条规则`, 'success');
+      closeModal('importRulesModal'); loadRules();
+      importFile = null; $id('importFileName').textContent = ''; $id('importFileInput').value = '';
+    } else toast(d.error || '导入失败', 'error');
+  } catch(e) {
+    $id('importStatus').style.display = 'none';
+    toast('导入请求失败: ' + e.message, 'error');
+  }
+  $id('btnImport').disabled = !importFile;
+}
+
+/* ── Analyze (SSE) ── */
+let analyzing = false;
+
+function startAnalysis() {
+  if (analyzing) { toast('分析正在进行中', 'info'); return; }
+  if (!currentFile) { toast('请先选择日志文件', 'info'); return; }
+
+  analyzing = true;
+  const btn = $id('btnAnalyze');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> 分析中…';
+  $id('resultBox').textContent = '';
+  $id('progressBar').style.width = '0%';
+  $id('statusText').textContent = '准备中…';
+
+  const fd = new FormData();
+  fd.append('file', currentFile);
+  fd.append('analysis_notes', $id('cfgNotes')?.value || '');
+  fd.append('clean_prompt', $id('cfgCleanPrompt')?.value || '');
+  fd.append('summary_max_chars', $id('cfgSummaryChars')?.value || '90000');
+
+  fetch('/api/analyze', { method:'POST', body:fd })
+    .then(resp => {
+      if (!resp.ok) return resp.json().then(d => { throw new Error(d.error || '请求失败'); });
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+
+      function pump() {
+        return reader.read().then(({done, value}) => {
+          if (done) { finish(); return; }
+          buf += decoder.decode(value, {stream:true});
+          const lines = buf.split('\n');
+          buf = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            try {
+              const ev = JSON.parse(line.slice(6));
+              if (ev.type === 'progress') {
+                $id('progressBar').style.width = ev.pct + '%';
+                $id('statusText').textContent = ev.msg;
+              } else if (ev.type === 'ok') {
+                $id('resultBox').textContent = ev.result;
+                $id('progressBar').style.width = '100%';
+                $id('statusText').textContent = '完成。';
+                toast('分析完成', 'success');
+              } else if (ev.type === 'error') {
+                $id('resultBox').textContent = ev.msg;
+                $id('statusText').textContent = '失败。';
+                toast('分析失败', 'error');
+              }
+            } catch(e) {}
+          }
+          return pump();
+        });
+      }
+      return pump();
+    })
+    .catch(e => {
+      $id('statusText').textContent = '错误：' + e.message;
+      toast(e.message, 'error');
+      finish();
+    });
+
+  function finish() {
+    analyzing = false;
+    btn.disabled = false;
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><polygon points="5,3 19,12 5,21 5,3"/></svg> 开始分析';
+  }
+}
+
+/* ── Download ── */
+function downloadResult() {
+  const text = $id('resultBox').textContent;
+  if (!text.trim()) { toast('暂无可保存的内容', 'info'); return; }
+  const blob = new Blob([text], {type:'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,13);
+  a.download = `serial_analysis_${ts}.txt`;
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+/* ── About ── */
+async function loadAbout() {
+  try {
+    const r = await fetch('/api/about'); const d = await r.json();
+    $id('aboutVersion').textContent = '版本：' + d.version;
+    $id('aboutAuthor').textContent = '作者：' + d.author;
+  } catch(e) {}
+}
+
+/* ── Bug Records (DB) ── */
+let bugsData = [], selectedBugId = null;
+
+async function loadBugs() {
+  const flt = $id('bugFilter').value;
+  const params = new URLSearchParams({limit:'500'});
+  if (flt && flt !== '全部') params.set('verdict', flt);
+  try {
+    const r = await fetch('/api/bugs?' + params); const d = await r.json();
+    if (d.error) { toast(d.error, 'error'); return; }
+    bugsData = d.bugs || []; renderBugs();
+    const s = d.stats || {};
+    $id('bugStats').textContent =
+      `共 ${s.total||0} 条 | 待定 ${s['待定']||0} · 确认 ${s['确认']||0} · 误报 ${s['误报']||0} · 忽略 ${s['忽略']||0}`;
+  } catch(e) { toast('加载Bug失败: ' + e.message, 'error'); }
+}
+
+function renderBugs() {
+  const tbody = $id('bugsBody'); tbody.innerHTML = '';
+  selectedBugId = null;
+  bugsData.forEach(b => {
+    const tr = document.createElement('tr');
+    tr.onclick = () => selectBug(b, tr);
+    let src = b.source_file || '';
+    if (src.length > 35) src = '…' + src.slice(-33);
+    const vcls = b.human_verdict === '确认' ? 'color:#16a34a' : b.human_verdict === '误报' ? 'color:#dc2626' : '';
+    tr.innerHTML =
+      `<td>${b.id}</td><td>${esc(b.bug_no||'')}</td><td>${esc((b.title||'').slice(0,55))}</td>` +
+      `<td>${esc(b.severity||'')}</td><td style="font-size:.75rem">${esc(src)}</td>` +
+      `<td style="${vcls};font-weight:600">${esc(b.human_verdict||'待定')}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function selectBug(b, tr) {
+  $q('#bugsBody tr').forEach(r => r.classList.remove('selected'));
+  tr.classList.add('selected');
+  selectedBugId = b.id;
+  $id('bugVerdict').value = b.human_verdict || '待定';
+  $id('bugNotes').value = b.human_notes || '';
+  $id('bugDetail').textContent =
+    `[${b.bug_no||''}] ${b.title||''}\n类型：${b.bug_type||''}  时间：${b.log_time||''}\n结论：${(b.conclusion||'').slice(0,300)}`;
+}
+
+async function saveVerdict() {
+  if (!selectedBugId) { toast('请先选中一条Bug', 'info'); return; }
+  try {
+    const r = await fetch(`/api/bugs/${selectedBugId}/verdict`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ verdict: $id('bugVerdict').value, notes: $id('bugNotes').value })
+    });
+    const d = await r.json();
+    if (d.ok) { toast('判别已保存', 'success'); loadBugs(); }
+    else toast(d.error || '保存失败', 'error');
+  } catch(e) { toast('请求失败', 'error'); }
+}
+
+async function deleteBugRecord() {
+  if (!selectedBugId) { toast('请先选中一条', 'info'); return; }
+  if (!confirm(`确认删除 Bug #${selectedBugId}？`)) return;
+  try {
+    const r = await fetch(`/api/bugs/${selectedBugId}`, { method:'DELETE' });
+    const d = await r.json();
+    if (d.ok) { toast('已删除', 'success'); loadBugs(); }
+    else toast(d.error, 'error');
+  } catch(e) { toast('删除失败', 'error'); }
+}
+
+async function testDbConnection() {
+  try {
+    const r = await fetch('/api/bugs/test'); const d = await r.json();
+    if (d.ok) toast(d.msg, 'success');
+    else toast('连接失败: ' + d.msg, 'error');
+  } catch(e) { toast('请求失败', 'error'); }
+}
+
+/* ── Util ── */
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+/* ── Init ── */
+loadConfig();
+</script>
+</body>
+</html>

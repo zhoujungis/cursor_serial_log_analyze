@@ -1,0 +1,188 @@
+[
+  {
+    "priority": 1,
+    "category": "kernel_panic",
+    "label": "内核崩溃",
+    "pattern": "(?i)(kernel panic|coredump|cpu exception no\\.32|recv sigfpe signal|\\bassert\\b)"
+  },
+  {
+    "priority": 1,
+    "category": "oom_memory",
+    "label": "内存耗尽",
+    "pattern": "(?i)(out of memory|oom-killer|imp_encoder_pollingstream)"
+  },
+  {
+    "priority": 2,
+    "category": "storage_card_error",
+    "label": "存储卡异常",
+    "pattern": "(?i)(mmc det failed during system startup|mmc0: error(?: -?(?:145|159|110))?|mmc1: error -110 whilst initialising sd card|hal sdmmc sendcmdandwaitprocess|\\[sdmmc 1\\] err)"
+  },
+  {
+    "priority": 2,
+    "category": "kernel_env_corrupt",
+    "label": "内核环境损坏",
+    "pattern": "(?i)(can't get kernel image|warning - bad crc, using default environment)"
+  },
+  {
+    "priority": 2,
+    "category": "wifi_driver_error",
+    "label": "WiFi驱动异常",
+    "pattern": "(?i)(plat\\s*soc:.*(?:elhcc|hcc) reinit failed|plat_soc:e\\]wifi_power_on_fail|plat_soc:e\\]hcc reinit failed|open /dev/atbm_ioctl fail|cannotsend cmd dataerror=|wait wifi init)"
+  },
+  {
+    "priority": 2,
+    "category": "wifi_hcc_error",
+    "label": "WiFi HCC异常",
+    "pattern": "(?i)(hcc tx buf que is full|free buf error|hcc invalid pkt_len|trace: ba_push|discard it|\\[wifi-hcc\\].*host timeout)"
+  },
+  {
+    "priority": 2,
+    "category": "host_wifi_comm_fail",
+    "label": "主控WiFi通信异常",
+    "pattern": "(?i)(wait result timeout|get battery info failed|mcu get battery level result: -3|wifi_module_get_battery_info fail|hcc send rx data\\(0x2c\\) to host timeout|\\[0\\.u\\] buffer full)"
+  },
+  {
+    "priority": 2,
+    "category": "heartbeat_reset",
+    "label": "心跳异常重启",
+    "pattern": "(?i)(err:heartbeat|e:hb reset host)"
+  },
+  {
+    "priority": 3,
+    "category": "ble_error",
+    "label": "蓝牙异常",
+    "pattern": "(?i)(pm ble open failed|ble hwbt filenode open fail|\\[ble\\]:not connected|wifi_module_ble_stop fail|e:ble\\?w\\?wait\\?timeout)"
+  },
+  {
+    "priority": 3,
+    "category": "wifi_scan_fail",
+    "label": "WiFi扫描失败",
+    "pattern": "(?i)(wpa_scan fail|aich wifi sta scan failed|e:wifi_ctrl_thr: aich_wifi_sta_scan failed|aich_wifi_sta_scan_results failed|wifi_module_get_aplist fail|gz_api_process_thread ap list count: 0, result: -3|get wifi list ret:-3)"
+  },
+  {
+    "priority": 3,
+    "category": "wifi_cmd_timeout",
+    "label": "WiFi命令超时",
+    "pattern": "(?i)(wpa cmd timeout|host timeout|att\\?timeout|sync cmd:4 res:-3)"
+  },
+  {
+    "priority": 3,
+    "category": "wifi_module_reset",
+    "label": "WiFi模块重置",
+    "pattern": "(?i)(aich_reset_soft|reset reason|romboot startup)"
+  },
+  {
+    "priority": 3,
+    "category": "ota_download_fail",
+    "label": "OTA下载失败",
+    "pattern": "(?i)(download finish result -15|downlaod file fail:-15|wifi update result[:：]-1)"
+  },
+  {
+    "priority": 3,
+    "category": "radar_upgrade_fail",
+    "label": "雷达升级失败",
+    "pattern": "(?i)(radar upgrade failed|gz_sys_upgrade_ex radar update error|s_radar_upgrade_result:(?:-1|255))"
+  },
+  {
+    "priority": 3,
+    "category": "video_capture_fail",
+    "label": "视频抓取失败",
+    "pattern": "(?i)(gz_hal_video_catchyuv.*(?:imp_framesource_getframe failed: ffffffff|ax_ivps_getchnframe failed: 800d0120)|gz_video_input_catch_yuv capture yuv error: -1|catch jpeg fail|catch panorama jpeg fail)"
+  },
+  {
+    "priority": 3,
+    "category": "video_stream_error",
+    "label": "视频出流异常",
+    "pattern": "(?i)(gop error|al_encoder_setmaxbitrate failed|over size)"
+  },
+  {
+    "priority": 3,
+    "category": "i2c_comm_fail",
+    "label": "I2C通信异常",
+    "pattern": "(?i)(electricity meter type:-1|err:aich i2c_write failed|hal_i2c_bus_state timeout|hal_i2c_master_receive fail|memaddress:0x6 read fail)"
+  },
+  {
+    "priority": 3,
+    "category": "mcu_error",
+    "label": "MCU异常",
+    "pattern": "(?i)(mcu is abnormal|mcu upgrade ret:-1)"
+  },
+  {
+    "priority": 4,
+    "category": "ptz_error",
+    "label": "云台异常",
+    "pattern": "(?i)(is blocked|ptz open fail, can't find /dev/motor)"
+  },
+  {
+    "priority": 4,
+    "category": "spi_comm_fail",
+    "label": "SPI通信异常",
+    "pattern": "(?i)spi communication fail!"
+  },
+  {
+    "priority": 4,
+    "category": "wake_fail",
+    "label": "唤醒失败",
+    "pattern": "(?i)wake failed"
+  },
+  {
+    "priority": 4,
+    "category": "charging_error",
+    "label": "充电异常",
+    "pattern": "(?i)luke m_first_wakeup_reason:33792"
+  },
+  {
+    "priority": 4,
+    "category": "usb_disconnect",
+    "label": "USB断连",
+    "pattern": "(?i)usb disconnect"
+  },
+  {
+    "priority": 4,
+    "category": "ai_callback_error",
+    "label": "AI回调异常",
+    "pattern": "(?i)xm_video_person_face_callback err"
+  },
+  {
+    "priority": 4,
+    "category": "cloud_storage_fail",
+    "label": "云存上传失败",
+    "pattern": "(?i)httpc_ipc_cloud_storage_event_notify fail ret\\[-4378\\]"
+  },
+  {
+    "priority": 4,
+    "category": "t41_power_manager_error",
+    "label": "电源管理异常",
+    "pattern": "(?i)\\[sdk\\]: gz_dev_power_manager_set_status set pm status error: -1"
+  },
+  {
+    "priority": 4,
+    "category": "system_resource_free_error",
+    "label": "资源回收异常",
+    "pattern": "(?i)can't free"
+  },
+  {
+    "priority": 5,
+    "category": "startup_slow",
+    "label": "启动耗时异常",
+    "pattern": "(?i)(times from system start exceed 20s|host startup time:[234])"
+  },
+  {
+    "priority": 5,
+    "category": "reboot_indicator",
+    "label": "重启判断日志",
+    "pattern": "(?i)(i:version|power gpio:1|reset gpio:1|dmesg)"
+  },
+  {
+    "priority": 5,
+    "category": "wifi_state_abnormal",
+    "label": "WiFi状态异常",
+    "pattern": "(?i)\\b(disconnect|scanning|exception)\\b"
+  },
+  {
+    "priority": 5,
+    "category": "atbm_event_list_full",
+    "label": "ATBM事件列表满",
+    "pattern": "(?i)atbm_ioctl_notify_add: status event list is full"
+  }
+]
