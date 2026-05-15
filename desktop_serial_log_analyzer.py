@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-桌面 GUI（tkinter）：打开串口/设备 .log/.txt，规则扫描 + Cloud 清洗节选 + Cursor 总结。
+桌面 GUI（tkinter）：打开串口/设备 .log/.txt，规则扫描 + Cloud 清洗节选 + LLM 总结。
 清洗文案、节选/材料体量：菜单「设置」；串口匹配规则与表格导入：菜单「规则」。依赖：requests、python-dotenv、pypdf（仅 .pdf）、openpyxl（.xlsx/.xlsm）、csv（.csv 规则导入）。
 
 运行：python desktop_serial_log_analyzer.py
 """
 from __future__ import annotations
 
-import base64
 import csv
 import hashlib
 import io
@@ -27,7 +26,7 @@ import tkinter as tk
 import requests
 from dotenv import load_dotenv
 
-from serial_alert_rules import (
+from utils.serial_alert_rules import (
     RAW_ALERT_RULE_DEFINITIONS,
     load_user_rules_raw,
     save_user_rules_raw,
@@ -43,10 +42,10 @@ def _app_root() -> Path:
 
 
 _ROOT = _app_root()
-load_dotenv(_ROOT / ".env")
-load_dotenv(Path.cwd() / ".env")
+load_dotenv(_ROOT / "config/.env")
+load_dotenv(Path.cwd() / "config/.env")
 
-# ----- 内联：日志解析 + Cursor Cloud（原独立 summarize_*.py）-----
+# ----- 内联：日志解析 + LLM Cloud（原独立 summarize_*.py）-----
 
 _INTERESTING = re.compile(
     r"(ERROR|ERR\b|FATAL|CRITICAL|\bWARN(?:ING)?\b|"
@@ -172,45 +171,11 @@ def parse_report_text(text: str, source_file: str) -> list[Incident]:
     return out
 
 
-CURSOR_API_BASE = "https://api.cursor.com"
-_agent_id_cache: str | None = None
+DEEPSEEK_API_BASE = "https://api.deepseek.com"
 
 
 def _T(*parts: str) -> str:
     return "".join(parts)
-
-
-def _cursor_basic_auth_header(api_key: str) -> str:
-    token = base64.b64encode(f"{api_key}:".encode()).decode("ascii")
-    return f"Basic {token}"
-
-
-def _normalize_github_repo_url(url: str) -> str:
-    u = (url or "").strip().rstrip("/")
-    if len(u) >= 4 and u.lower().endswith(".git"):
-        return u[:-4].rstrip("/")
-    return u
-
-
-def _is_ref_validation_error(detail: str) -> bool:
-    s = (detail or "").lower()
-    return (
-        "validation_error" in s
-        and "branch" in s
-        and ("does not exist" in s or "verify existence" in s)
-    )
-
-
-def _candidate_starting_refs(primary_ref: str) -> list[str]:
-    refs = [primary_ref.strip() if primary_ref else "", "main", "master", ""]
-    out: list[str] = []
-    seen: set[str] = set()
-    for r in refs:
-        if r in seen:
-            continue
-        seen.add(r)
-        out.append(r)
-    return out
 
 
 def _repair_mojibake_text(text: str) -> str:
@@ -228,123 +193,36 @@ def _repair_mojibake_text(text: str) -> str:
     return text
 
 
-def _parse_sse_stream(response: requests.Response):
-    event_name = None
-    for raw in response.iter_lines(decode_unicode=False):
-        if raw is None:
-            continue
-        if isinstance(raw, bytes):
-            line = raw.decode("utf-8", errors="replace").strip()
-        else:
-            line = str(raw).strip()
-        if not line:
-            continue
-        if line.startswith("event:"):
-            event_name = line[6:].strip()
-            continue
-        if line.startswith("data:"):
-            payload = line[5:].strip()
-            if payload == "{}" or not payload:
-                yield event_name, {}
-                continue
-            try:
-                data = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
-            yield event_name, data
-            event_name = None
-
-
-def _cursor_stream_collect(agent_id: str, run_id: str, api_key: str) -> str:
-    url = f"{CURSOR_API_BASE}/v1/agents/{agent_id}/runs/{run_id}/stream"
-    headers = {
-        "Authorization": _cursor_basic_auth_header(api_key),
-        "Accept": "text/event-stream",
-    }
-    parts: list[str] = []
-    with requests.get(url, headers=headers, stream=True, timeout=600) as resp:
-        resp.encoding = "utf-8"
-        resp.raise_for_status()
-        for event_name, data in _parse_sse_stream(resp):
-            if event_name == "assistant" and isinstance(data, dict) and "text" in data:
-                parts.append(_repair_mojibake_text(data["text"]))
-            elif event_name == "result":
-                break
-    return "".join(parts)
-
-
-def _cursor_submit(prompt: str) -> str:
-    global _agent_id_cache
-
-    api_key = os.environ.get("CURSOR_API_KEY", "").strip()
-    github_repo_raw = os.environ.get("CURSOR_GITHUB_REPO", "").strip()
-    github_repo = _normalize_github_repo_url(github_repo_raw)
+def _deepseek_submit(prompt: str) -> str:
+    """\u8c03\u7528 DeepSeek API\uff0c\u8fd4\u56de\u5b8c\u6574\u54cd\u5e94\u6587\u672c\u3002"""
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
-        raise SystemExit("Set CURSOR_API_KEY (.env).")
-    if not github_repo:
-        raise SystemExit("Set CURSOR_GITHUB_REPO (cloneable GitHub URL).")
+        raise SystemExit("\u8bf7\u5728 .env \u4e2d\u8bbe\u7f6e DEEPSEEK_API_KEY")
 
-    ref = os.environ.get("CURSOR_GITHUB_REF", "main").strip() or "main"
-    model = os.environ.get("CURSOR_MODEL", "").strip() or None
+    model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
     headers = {
-        "Authorization": _cursor_basic_auth_header(api_key),
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-
-    agent_id = _agent_id_cache
-    if agent_id is None:
-        last_error = None
-        r = None
-        for ref_try in _candidate_starting_refs(ref):
-            repo_cfg = {"url": github_repo}
-            if ref_try:
-                repo_cfg["startingRef"] = ref_try
-            body = {
-                "prompt": {"text": prompt},
-                "repos": [repo_cfg],
-                "autoCreatePR": False,
-            }
-            if model:
-                body["model"] = {"id": model}
-            r = requests.post(
-                f"{CURSOR_API_BASE}/v1/agents",
-                headers=headers,
-                json=body,
-                timeout=120,
-            )
-            try:
-                r.raise_for_status()
-                payload = r.json()
-                agent_id = payload["agent"]["id"]
-                run_id = payload["run"]["id"]
-                _agent_id_cache = agent_id
-                return _cursor_stream_collect(agent_id, run_id, api_key)
-            except requests.HTTPError as e:
-                try:
-                    detail = r.text[:1200]
-                except Exception:
-                    detail = str(e)
-                if _is_ref_validation_error(detail):
-                    last_error = e
-                    continue
-                raise RuntimeError(f"Cursor create agent failed: {e}\n{detail}") from e
-        if last_error is not None:
-            raise RuntimeError(f"Cursor branch/ref failed after retries: {last_error}") from last_error
-        raise RuntimeError("Cursor agent create failed")
-
-    r = requests.post(
-        f"{CURSOR_API_BASE}/v1/agents/{agent_id}/runs",
+    body = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+        "max_tokens": 8192,
+    }
+    resp = requests.post(
+        f"{DEEPSEEK_API_BASE}/v1/chat/completions",
         headers=headers,
-        json={"prompt": {"text": prompt}},
-        timeout=120,
+        json=body,
+        timeout=600,
     )
-    r.raise_for_status()
-    run_id = r.json()["run"]["id"]
-    return _cursor_stream_collect(agent_id, run_id, api_key)
+    resp.raise_for_status()
+    result = resp.json()
+    return result["choices"][0]["message"]["content"]
 
 
 def _xlsx_workbook_to_plain(path: Path, max_chars: int = 36_000) -> str:
-    """将工作簿各表导出为可读纯文本（制表符分列），供 Cursor 提取串口匹配规则。"""
+    """将工作簿各表导出为可读纯文本（制表符分列），供 LLM 提取串口匹配规则。"""
     try:
         from openpyxl import load_workbook
     except ImportError as e:
@@ -384,7 +262,7 @@ def _xlsx_workbook_to_plain(path: Path, max_chars: int = 36_000) -> str:
 
 
 def _csv_file_to_plain(path: Path, max_chars: int = 36_000) -> str:
-    """将 CSV 解码为与 xlsx 导出风格一致的纯文本（制表符分列），供 Cursor 提取规则。"""
+    """将 CSV 解码为与 xlsx 导出风格一致的纯文本（制表符分列），供 LLM 提取规则。"""
     raw = path.read_bytes()
     text: str | None = None
     for enc in ("utf-8-sig", "utf-8", "gb18030", "latin-1"):
@@ -612,9 +490,9 @@ def build_summarize_prompt_serial(
     )
 
 
-_USER_RULES_PATH = _ROOT / "serial_rules_user.json"
+_USER_RULES_PATH = _ROOT / "config/serial_rules_user.json"
 
-APP_VERSION = "V 0.2"
+APP_VERSION = "V 0.5"
 APP_AUTHOR = "zhoujun@glazero.com"
 DISCLAIMER_TEXT = (
     "本次分析结果只对本次导入的串口 log 有效；\n"
@@ -622,9 +500,9 @@ DISCLAIMER_TEXT = (
 )
 
 
-def apply_cursor_env_to_dotenv(updates: dict[str, str]) -> None:
-    """将 Cursor 相关变量写入项目根目录 .env（同名键覆盖；值为空则删除该键）。"""
-    env_path = _ROOT / ".env"
+def apply_deepseek_env_to_dotenv(updates: dict[str, str]) -> None:
+    """将 DeepSeek 相关变量写入项目根目录 .env（同名键覆盖；值为空则删除该键）。"""
+    env_path = _ROOT / "config/.env"
     keys = set(updates.keys())
     kept: list[str] = []
     if env_path.exists():
@@ -655,9 +533,9 @@ def apply_cursor_env_to_dotenv(updates: dict[str, str]) -> None:
     except TypeError:
         load_dotenv(env_path)
     try:
-        load_dotenv(Path.cwd() / ".env", override=True)
+        load_dotenv(Path.cwd() / "config/.env", override=True)
     except TypeError:
-        load_dotenv(Path.cwd() / ".env")
+        load_dotenv(Path.cwd() / "config/.env")
 
 
 def _default_cleaning_prompt() -> str:
@@ -680,7 +558,7 @@ class WorkerConfig:
 
 
 def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
-    from serial_alert_rules import build_compiled_rules, match_log_alerts_for_rules
+    from utils.serial_alert_rules import build_compiled_rules, match_log_alerts_for_rules
 
     def _raw_material(cleaned: str, budget: int, name: str) -> tuple[str, bool]:
         truncated = False
@@ -710,38 +588,65 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
         )
 
         q.put(("progress", 28, "规则扫描…"))
+        all_lines = cleaned.splitlines()
         buf: list[str] = []
         hit_lines = 0
-        for i, line in enumerate(cleaned.splitlines(), 1):
+        hit_categories: set[str] = set()
+        hit_line_map: dict[str, list[int]] = {}
+        hit_lines_with_text: list[tuple[int, str]] = []
+        for i, line in enumerate(all_lines):
             hits = match_log_alerts_for_rules(line, rules)
             if not hits:
                 continue
             hit_lines += 1
+            hit_lines_with_text.append((i, line))
+            for h in hits:
+                hit_categories.add(h["cat"])
+                hit_line_map.setdefault(h["cat"], []).append(i)
             if len(buf) < 120:
                 labs = "、".join(h["label"] for h in hits)
-                buf.append(f"行 {i}: [{labs}] {line[:400]}{'…' if len(line) > 400 else ''}")
+                buf.append(f"行 {i+1}: [{labs}] {line[:400]}{'…' if len(line) > 400 else ''}")
         if not buf:
             rule_block = "（本文件未命中内置/自定义规则关键字模式）"
         else:
             rule_block = "\n".join(buf)
 
-        q.put(("progress", 40, "解析异常行（关键词/栈）…"))
+        # ── Skills 智能判定 ──
+        skill_block = ""
+        if hit_categories:
+            q.put(("progress", 40, "Skills 智能判定…"))
+            try:
+                from utils.cursor_skills import run_all_skills, format_skill_results
+                skill_results = run_all_skills(
+                    all_lines=all_lines,
+                    hit_categories=hit_categories,
+                    hit_line_map=hit_line_map,
+                    hit_lines_with_text=hit_lines_with_text,
+                    llm_fn=_deepseek_submit,
+                    max_skills=5,
+                    progress_fn=lambda msg: q.put(("progress", 45, msg)),
+                )
+                skill_block = format_skill_results(skill_results)
+            except Exception as e:
+                skill_block = f"（Skills 判定跳过：{e}）"
+
+        q.put(("progress", 55, "解析异常行（关键词/栈）…"))
         incidents: list[Incident] = parse_report_text(cleaned, cfg.file_path.name)
 
-        q.put(("progress", 48, "调用 Cloud 清洗节选…"))
+        q.put(("progress", 60, "调用 Cloud 清洗节选…"))
         try:
-            clean_limit = int(os.environ.get("CURSOR_CLEAN_MAX_CHARS", "24000"))
+            clean_limit = int(os.environ.get("CLEAN_MAX_CHARS", "24000"))
         except ValueError:
             clean_limit = 24000
         clean_limit = max(1000, min(clean_limit, 80_000))
         excerpt = cleaned[:clean_limit]
         cp = (cfg.user_clean_prompt or _default_cleaning_prompt()).strip()
         try:
-            llm_clean_summary = _cursor_submit(cp + excerpt).strip()
+            llm_clean_summary = _deepseek_submit(cp + excerpt).strip()
         except Exception as e:
             llm_clean_summary = f"（Cloud 清洗失败：{e}）"
 
-        q.put(("progress", 62, "组装分析材料…"))
+        q.put(("progress", 68, "组装分析材料…"))
         budget = max(4000, min(cfg.max_chars, 240_000))
         if incidents:
             material, truncated = build_material_for_prompt(incidents, budget)
@@ -752,11 +657,11 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
 
         # 持续学习：注入历史人工判别作为上下文
         try:
-            from db_manager import get_learning_context
+            from utils.db_manager import get_learning_context
             learning_ctx = get_learning_context()
             if learning_ctx:
                 prefix_parts.append(learning_ctx)
-                q.put(("progress", 63, "已加载历史判别经验…"))
+                q.put(("progress", 69, "已加载历史判别经验…"))
         except Exception:
             pass
 
@@ -767,6 +672,8 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
         prefix_parts.append(
             f"## 规则命中摘要（共约 {hit_lines} 行触发规则）\n\n" + rule_block
         )
+        if skill_block:
+            prefix_parts.append(skill_block)
         prefix_parts.append("## Cloud 清洗输出\n\n" + (llm_clean_summary or "（Cloud 未返回内容）"))
         material = "\n\n".join(prefix_parts) + "\n\n---\n\n" + material
 
@@ -778,16 +685,16 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
             structured,
         )
 
-        q.put(("progress", 72, "调用 Cursor Cloud 生成总结（可能较久）…"))
-        summary = _cursor_submit(prompt)
+        q.put(("progress", 75, "调用 DeepSeek 生成总结（可能较久）…"))
+        summary = _deepseek_submit(prompt)
         if not summary or not summary.strip():
-            q.put(("err", "Cursor 返回空内容。"))
+            q.put(("err", "DeepSeek 返回空内容。"))
             return
 
         q.put(("progress", 95, "保存 Bug 到数据库…"))
         db_count = 0
         try:
-            from db_manager import save_bugs_from_summary
+            from utils.db_manager import save_bugs_from_summary
             db_count = save_bugs_from_summary(summary, cfg.file_path.name)
         except Exception as db_err:
             q.put(("progress", 95, f"数据库写入跳过（{db_err}）"))
@@ -802,7 +709,7 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
             f"material_truncated: {truncated}\n"
             f"rule_hit_lines: {hit_lines}\n"
             f"bugs_saved_to_db: {db_count}\n\n"
-            f"=== Cursor summary ===\n\n"
+            f"=== LLM summary ===\n\n"
         )
         q.put(("ok", meta + summary.strip()))
     except Exception as e:
@@ -917,7 +824,7 @@ class MainApp:
         file_menu.add_command(label="打开…", command=self._pick_file)
         settings_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="设置", menu=settings_menu)
-        settings_menu.add_command(label="Cursor API 与仓库…", command=self._open_cursor_config)
+        settings_menu.add_command(label="DeepSeek API…", command=self._open_deepseek_config)
         settings_menu.add_command(label="清洗与分析材料…", command=self._open_clean_config)
         rules_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="规则", menu=rules_menu)
@@ -927,6 +834,9 @@ class MainApp:
         menubar.add_cascade(label="数据库", menu=db_menu)
         db_menu.add_command(label="Bug 记录…", command=self._open_bug_records)
         db_menu.add_command(label="测试连接…", command=self._test_db_connection)
+        skills_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Skills", menu=skills_menu)
+        skills_menu.add_command(label="管理 Skills…", command=self._open_skills_manager)
         menubar.add_command(label="免责声明", command=self._show_disclaimer)
         menubar.add_command(label="关于", command=self._show_about)
 
@@ -938,6 +848,8 @@ class MainApp:
         self._analysis_notes: str = ""
         self._bug_win: tk.Toplevel | None = None
         self._bug_tree: ttk.Treeview | None = None
+        self._skills_win: tk.Toplevel | None = None
+        self._skills_tree: ttk.Treeview | None = None
         self._clean_prompt_body: str = _default_cleaning_prompt()
         self._clean_win: tk.Toplevel | None = None
         self._rules_win: tk.Toplevel | None = None
@@ -1026,17 +938,15 @@ class MainApp:
             parent=self.root,
         )
 
-    def _open_cursor_config(self) -> None:
+    def _open_deepseek_config(self) -> None:
         dlg = tk.Toplevel(self.root)
-        dlg.title("Cursor API 与仓库")
+        dlg.title("DeepSeek API")
         dlg.transient(self.root)
         dlg.grab_set()
 
         keys = (
-            ("CURSOR_API_KEY", "API Key（Dashboard → Integrations）", True),
-            ("CURSOR_GITHUB_REPO", "GitHub 仓库 URL（可克隆）", False),
-            ("CURSOR_GITHUB_REF", "分支 / ref（默认 main）", False),
-            ("CURSOR_MODEL", "模型 ID（可选，留空则用账号默认）", False),
+            ("DEEPSEEK_API_KEY", "API Key（deepseek.com/api_keys）", True),
+            ("DEEPSEEK_MODEL", "模型（默认 deepseek-chat）", False),
         )
         vars_: dict[str, tk.StringVar] = {}
         frm = ttk.Frame(dlg, padding=10)
@@ -1060,7 +970,7 @@ class MainApp:
         hint.grid(row=len(keys), column=0, columnspan=2, sticky=tk.W, pady=(8, 0))
 
         def save() -> None:
-            apply_cursor_env_to_dotenv({k: vars_[k].get() for k in vars_})
+            apply_deepseek_env_to_dotenv({k: vars_[k].get() for k in vars_})
             messagebox.showinfo("配置", "已保存到 .env。", parent=dlg)
             dlg.destroy()
 
@@ -1126,13 +1036,13 @@ class MainApp:
         env_fr = ttk.LabelFrame(body, text="材料与节选体量（写入项目 .env）", padding=(6, 6))
         env_fr.grid(row=4, column=0, sticky=tk.EW, pady=(0, 8))
         env_fr.columnconfigure(1, weight=1)
-        self._env_summary_chars = tk.StringVar(value=os.environ.get("CURSOR_SUMMARY_MAX_CHARS", "90000"))
-        self._env_clean_chars = tk.StringVar(value=os.environ.get("CURSOR_CLEAN_MAX_CHARS", "24000"))
-        ttk.Label(env_fr, text="CURSOR_SUMMARY_MAX_CHARS").grid(row=0, column=0, sticky=tk.W, pady=2)
+        self._env_summary_chars = tk.StringVar(value=os.environ.get("SUMMARY_MAX_CHARS", "90000"))
+        self._env_clean_chars = tk.StringVar(value=os.environ.get("CLEAN_MAX_CHARS", "24000"))
+        ttk.Label(env_fr, text="SUMMARY_MAX_CHARS").grid(row=0, column=0, sticky=tk.W, pady=2)
         ttk.Entry(env_fr, textvariable=self._env_summary_chars, width=16).grid(
             row=0, column=1, sticky=tk.W, pady=2, padx=(8, 0)
         )
-        ttk.Label(env_fr, text="CURSOR_CLEAN_MAX_CHARS").grid(row=1, column=0, sticky=tk.W, pady=2)
+        ttk.Label(env_fr, text="CLEAN_MAX_CHARS").grid(row=1, column=0, sticky=tk.W, pady=2)
         ttk.Entry(env_fr, textvariable=self._env_clean_chars, width=16).grid(
             row=1, column=1, sticky=tk.W, pady=2, padx=(8, 0)
         )
@@ -1152,12 +1062,12 @@ class MainApp:
                     if v < 4000 or v > 240_000:
                         messagebox.showwarning(
                             "校验",
-                            "CURSOR_SUMMARY_MAX_CHARS 建议在 4000～240000。",
+                            "SUMMARY_MAX_CHARS 建议在 4000～240000。",
                             parent=win,
                         )
                         return
                 except ValueError:
-                    messagebox.showwarning("校验", "CURSOR_SUMMARY_MAX_CHARS 须为整数或留空。", parent=win)
+                    messagebox.showwarning("校验", "SUMMARY_MAX_CHARS 须为整数或留空。", parent=win)
                     return
             if c_raw:
                 try:
@@ -1165,19 +1075,19 @@ class MainApp:
                     if cv < 1000 or cv > 80_000:
                         messagebox.showwarning(
                             "校验",
-                            "CURSOR_CLEAN_MAX_CHARS 建议在 1000～80000。",
+                            "CLEAN_MAX_CHARS 建议在 1000～80000。",
                             parent=win,
                         )
                         return
                 except ValueError:
-                    messagebox.showwarning("校验", "CURSOR_CLEAN_MAX_CHARS 须为整数或留空。", parent=win)
+                    messagebox.showwarning("校验", "CLEAN_MAX_CHARS 须为整数或留空。", parent=win)
                     return
             self._analysis_notes = self._dlg_notes.get("1.0", tk.END).rstrip("\n")
             self._clean_prompt_body = self._dlg_clean_prompt.get("1.0", tk.END).rstrip("\n")
-            apply_cursor_env_to_dotenv(
+            apply_deepseek_env_to_dotenv(
                 {
-                    "CURSOR_SUMMARY_MAX_CHARS": s_raw,
-                    "CURSOR_CLEAN_MAX_CHARS": c_raw,
+                    "SUMMARY_MAX_CHARS": s_raw,
+                    "CLEAN_MAX_CHARS": c_raw,
                 }
             )
             messagebox.showinfo("清洗与分析材料", "已保存文本与 .env 项。", parent=win)
@@ -1203,8 +1113,8 @@ class MainApp:
         self._dlg_notes.insert(tk.END, self._analysis_notes)
         self._dlg_clean_prompt.delete("1.0", tk.END)
         self._dlg_clean_prompt.insert(tk.END, self._clean_prompt_body)
-        self._env_summary_chars.set(os.environ.get("CURSOR_SUMMARY_MAX_CHARS", "90000"))
-        self._env_clean_chars.set(os.environ.get("CURSOR_CLEAN_MAX_CHARS", "24000"))
+        self._env_summary_chars.set(os.environ.get("SUMMARY_MAX_CHARS", "90000"))
+        self._env_clean_chars.set(os.environ.get("CLEAN_MAX_CHARS", "24000"))
         w.deiconify()
         w.lift()
 
@@ -1387,7 +1297,7 @@ class MainApp:
 
     def _test_db_connection(self) -> None:
         try:
-            from db_manager import test_connection
+            from utils.db_manager import test_connection
             ok, msg = test_connection()
             if ok:
                 messagebox.showinfo("数据库", msg, parent=self.root)
@@ -1398,7 +1308,7 @@ class MainApp:
 
     def _open_bug_records(self) -> None:
         try:
-            from db_manager import init_db
+            from utils.db_manager import init_db
             init_db()
         except Exception as e:
             messagebox.showerror("数据库", f"连接失败：{e}", parent=self.root)
@@ -1494,7 +1404,7 @@ class MainApp:
         for iid in self._bug_tree.get_children():
             self._bug_tree.delete(iid)
         try:
-            from db_manager import list_bugs, count_bugs
+            from utils.db_manager import list_bugs, count_bugs
             flt = self._bug_filter_var.get()
             rows = list_bugs(limit=500, verdict=flt if flt != "全部" else None)
             for r in rows:
@@ -1525,7 +1435,7 @@ class MainApp:
             return
         bug_id = int(sel[0])
         try:
-            from db_manager import get_bug
+            from utils.db_manager import get_bug
             b = get_bug(bug_id)
             if not b:
                 return
@@ -1549,7 +1459,7 @@ class MainApp:
             return
         bug_id = int(sel[0])
         try:
-            from db_manager import update_verdict
+            from utils.db_manager import update_verdict
             ok = update_verdict(bug_id, self._verdict_var.get(), self._verdict_notes_var.get())
             if ok:
                 self._refresh_bug_table()
@@ -1567,22 +1477,201 @@ class MainApp:
         if not messagebox.askyesno("确认", f"删除 Bug #{bug_id}？", parent=self._bug_win):
             return
         try:
-            from db_manager import delete_bug
+            from utils.db_manager import delete_bug
             delete_bug(bug_id)
             self._refresh_bug_table()
         except Exception as e:
             messagebox.showerror("删除失败", str(e)[:500], parent=self._bug_win)
 
+    # ── Skills 管理 ─────────────────────────────────────────────
+
+    def _open_skills_manager(self) -> None:
+        if self._skills_win is not None and self._skills_win.winfo_exists():
+            self._skills_win.deiconify()
+            self._skills_win.lift()
+            self._refresh_skills_table()
+            return
+        self._build_skills_window()
+        self._refresh_skills_table()
+
+    def _build_skills_window(self) -> None:
+        win = tk.Toplevel(self.root)
+        win.title("Skills 管理")
+        win.transient(self.root)
+        win.minsize(700, 380)
+        win.geometry("780x440")
+        outer = ttk.Frame(win, padding=8)
+        outer.pack(fill=tk.BOTH, expand=True)
+
+        top = ttk.Frame(outer)
+        top.pack(fill=tk.X, pady=(0, 6))
+        ttk.Button(top, text="刷新", command=self._refresh_skills_table, style="Secondary.TButton").pack(
+            side=tk.LEFT, padx=(0, 8),
+        )
+        ttk.Button(top, text="+ 添加自定义 Skill", command=self._add_skill_dialog).pack(side=tk.LEFT)
+        ttk.Button(top, text="删除选中", command=self._delete_selected_skill, style="Secondary.TButton").pack(
+            side=tk.LEFT, padx=(8, 0),
+        )
+        self._skills_count_var = tk.StringVar()
+        ttk.Label(top, textvariable=self._skills_count_var, style="SubtleOnBg.TLabel").pack(side=tk.RIGHT)
+
+        cols = ("id", "name", "trigger", "priority", "enabled", "source")
+        tree = ttk.Treeview(outer, columns=cols, show="headings", height=12, selectmode="browse")
+        tree.heading("id", text="ID")
+        tree.heading("name", text="名称")
+        tree.heading("trigger", text="触发类别")
+        tree.heading("priority", text="优先级")
+        tree.heading("enabled", text="启用")
+        tree.heading("source", text="来源")
+        tree.column("id", width=120, stretch=False)
+        tree.column("name", width=160)
+        tree.column("trigger", width=180)
+        tree.column("priority", width=56, stretch=False)
+        tree.column("enabled", width=50, stretch=False)
+        tree.column("source", width=60, stretch=False)
+        sy = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=sy.set)
+        tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        sy.pack(side=tk.RIGHT, fill=tk.Y)
+        tree.bind("<Double-1>", self._toggle_skill_enabled)
+        self._skills_tree = tree
+
+        hint = ttk.Label(outer, text="双击行切换启用/禁用", style="SubtleOnBg.TLabel")
+        hint.pack(anchor=tk.W, pady=(4, 0))
+
+        def close():
+            win.withdraw()
+        win.protocol("WM_DELETE_WINDOW", close)
+        self._skills_win = win
+
+    def _refresh_skills_table(self) -> None:
+        if self._skills_tree is None:
+            return
+        for iid in self._skills_tree.get_children():
+            self._skills_tree.delete(iid)
+        try:
+            from utils.cursor_skills import get_all_skills
+            skills = get_all_skills()
+            for s in skills:
+                cats = ", ".join(s.trigger_categories[:4])
+                self._skills_tree.insert(
+                    "", tk.END, iid=s.id,
+                    values=(
+                        s.id, s.name, cats, s.priority,
+                        "✓" if s.enabled else "✗",
+                        "内置" if s.builtin else "自定义",
+                    ),
+                )
+            self._skills_count_var.set(f"共 {len(skills)} 个 Skill")
+        except Exception as e:
+            self._skills_count_var.set(f"加载失败：{e}")
+
+    def _toggle_skill_enabled(self, _event: object = None) -> None:
+        if self._skills_tree is None:
+            return
+        sel = self._skills_tree.selection()
+        if not sel:
+            return
+        skill_id = sel[0]
+        try:
+            from utils.cursor_skills import get_skill_by_id, toggle_skill
+            s = get_skill_by_id(skill_id)
+            if s:
+                toggle_skill(skill_id, not s.enabled)
+                self._refresh_skills_table()
+        except Exception:
+            pass
+
+    def _delete_selected_skill(self) -> None:
+        if self._skills_tree is None:
+            return
+        sel = self._skills_tree.selection()
+        if not sel:
+            return
+        skill_id = sel[0]
+        try:
+            from utils.cursor_skills import get_skill_by_id, delete_user_skill
+            s = get_skill_by_id(skill_id)
+            if s and s.builtin:
+                messagebox.showinfo("提示", "内置 Skill 不可删除，可双击禁用。", parent=self._skills_win)
+                return
+            if not messagebox.askyesno("确认", f"删除自定义 Skill「{skill_id}」？", parent=self._skills_win):
+                return
+            delete_user_skill(skill_id)
+            self._refresh_skills_table()
+        except Exception as e:
+            messagebox.showerror("删除失败", str(e)[:500], parent=self._skills_win)
+
+    def _add_skill_dialog(self) -> None:
+        dlg = tk.Toplevel(self._skills_win or self.root)
+        dlg.title("添加自定义 Skill")
+        dlg.transient(self._skills_win or self.root)
+        dlg.geometry("520x480")
+        body = ttk.Frame(dlg, padding=12)
+        body.pack(fill=tk.BOTH, expand=True)
+
+        fields: dict[str, tk.StringVar] = {}
+        for label_text, key, default in [
+            ("Skill ID（英文标识）", "id", ""),
+            ("名称", "name", ""),
+            ("触发类别（逗号分隔）", "trigger_categories", ""),
+            ("触发关键词（逗号分隔）", "trigger_keywords", ""),
+            ("上下文行数", "context_lines", "25"),
+            ("优先级（1-10）", "priority", "5"),
+        ]:
+            ttk.Label(body, text=label_text).pack(anchor=tk.W, pady=(6, 0))
+            var = tk.StringVar(value=default)
+            ttk.Entry(body, textvariable=var, width=50).pack(fill=tk.X)
+            fields[key] = var
+
+        ttk.Label(body, text="Prompt 模板").pack(anchor=tk.W, pady=(6, 0))
+        prompt_text = tk.Text(body, height=8, width=50, wrap=tk.WORD)
+        prompt_text.pack(fill=tk.BOTH, expand=True)
+        prompt_text.insert("1.0", (
+            "你是XXX分析专家。以下日志片段包含可能的XXX异常。\n"
+            "请严格按以下格式输出：\n"
+            "【判定】确认异常 / 疑似误报 / 需更多上下文\n"
+            "【置信度】高/中/低\n"
+            "【关键发现】一句话概述\n"
+            "【建议】一句话排查建议\n\n"
+            "--- 日志片段 ---\n"
+        ))
+
+        def save():
+            sid = fields["id"].get().strip()
+            if not sid:
+                messagebox.showwarning("提示", "Skill ID 不能为空", parent=dlg)
+                return
+            try:
+                from utils.cursor_skills import add_user_skill
+                add_user_skill({
+                    "id": sid,
+                    "name": fields["name"].get().strip() or sid,
+                    "trigger_categories": [c.strip() for c in fields["trigger_categories"].get().split(",") if c.strip()],
+                    "trigger_keywords": [k.strip() for k in fields["trigger_keywords"].get().split(",") if k.strip()],
+                    "context_lines": int(fields["context_lines"].get() or "25"),
+                    "priority": int(fields["priority"].get() or "5"),
+                    "prompt_template": prompt_text.get("1.0", tk.END).strip() + "\n",
+                    "enabled": True,
+                })
+                dlg.destroy()
+                self._refresh_skills_table()
+            except Exception as e:
+                messagebox.showerror("保存失败", str(e)[:500], parent=dlg)
+
+        btn_frame = ttk.Frame(body)
+        btn_frame.pack(fill=tk.X, pady=(8, 0))
+        ttk.Button(btn_frame, text="保存", command=save, style="Accent.TButton").pack(side=tk.RIGHT)
+        ttk.Button(btn_frame, text="取消", command=dlg.destroy, style="Secondary.TButton").pack(side=tk.RIGHT, padx=(0, 8))
+
     def _import_rules_from_xlsx(self) -> None:
         if self._import_thread is not None and self._import_thread.is_alive():
             messagebox.showinfo("提示", "已有规则导入任务在运行。", parent=self.root)
             return
-        if not os.environ.get("CURSOR_API_KEY", "").strip() or not os.environ.get(
-            "CURSOR_GITHUB_REPO", ""
-        ).strip():
+        if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
             messagebox.showwarning(
-                "未配置 Cursor",
-                "请先在「设置 → Cursor API 与仓库…」中填写 CURSOR_API_KEY 与 CURSOR_GITHUB_REPO。",
+                "未配置 DeepSeek",
+                "请先在「设置 → DeepSeek API…」中填写 DEEPSEEK_API_KEY。",
                 parent=self.root,
             )
             return
@@ -1607,12 +1696,12 @@ class MainApp:
             messagebox.showwarning("提示", "请选择 .xlsx、.xlsm 或 .csv 文件。", parent=self.root)
             return
 
-        self._status.set("正在读取表格并调用 Cursor 提取规则（可能较久）…")
+        self._status.set("正在读取表格并调用 DeepSeek 提取规则（可能较久）…")
 
         def worker() -> None:
             try:
                 plain = _tabular_rules_source_to_plain(src_path)
-                llm_text = _cursor_submit(_rule_import_prompt(plain))
+                llm_text = _deepseek_submit(_rule_import_prompt(plain))
                 new_items = _rules_from_llm_response(llm_text)
                 if not new_items:
                     raise ValueError("模型未返回任何可用规则。")
@@ -1650,7 +1739,7 @@ class MainApp:
                 self._status.set(f"已导入 {len(added)} 条自定义规则。")
                 messagebox.showinfo(
                     "导入完成",
-                    f"已从「{src_path.name}」经 Cursor 提取并追加 {len(added)} 条规则到 serial_rules_user.json。\n"
+                    f"已从「{src_path.name}」经 DeepSeek 提取并追加 {len(added)} 条规则到 serial_rules_user.json。\n"
                     f"（若 category 与已有或内置键冲突，已自动加后缀。）",
                     parent=self.root,
                 )
@@ -1667,7 +1756,7 @@ class MainApp:
         if not self._current_file or not self._current_file.is_file():
             messagebox.showwarning("提示", "请先选择有效的日志文件。", parent=self.root)
             return
-        mc = int(os.environ.get("CURSOR_SUMMARY_MAX_CHARS", "90000"))
+        mc = int(os.environ.get("SUMMARY_MAX_CHARS", "90000"))
         cfg = WorkerConfig(
             file_path=self._current_file,
             max_chars=mc,

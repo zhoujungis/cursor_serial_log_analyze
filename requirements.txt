@@ -1,10 +1,6 @@
-torch
 pyserial>=3.5
-numpy
 requests
 python-dotenv
-reportlab
-python-docx
 pypdf
 openpyxl>=3.1
 flask>=3.0

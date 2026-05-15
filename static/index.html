@@ -17,13 +17,14 @@ body{font-family:"Microsoft YaHei UI","PingFang SC","Helvetica Neue",Arial,sans-
 
 /* ── Navbar ── */
 .navbar{background:var(--card);border-bottom:1px solid var(--border);
-  display:flex;align-items:center;padding:0 20px;height:48px;gap:6px;
-  box-shadow:0 1px 2px rgba(0,0,0,.04);position:sticky;top:0;z-index:50}
+  display:flex;align-items:center;padding:0 20px;height:48px;gap:4px;
+  box-shadow:0 1px 2px rgba(0,0,0,.04);position:sticky;top:0;z-index:50;
+  flex-wrap:nowrap;overflow-x:auto}
 .navbar .brand{font-weight:700;font-size:1.05rem;color:var(--accent);margin-right:16px;
   display:flex;align-items:center;gap:6px;white-space:nowrap}
 .navbar .brand svg{width:20px;height:20px}
-.nav-btn{background:none;border:none;padding:6px 12px;font-size:.875rem;color:var(--fg);
-  cursor:pointer;border-radius:6px;transition:background .15s}
+.nav-btn{background:none;border:none;padding:6px 10px;font-size:.85rem;color:var(--fg);
+  cursor:pointer;border-radius:6px;transition:background .15s;white-space:nowrap;flex-shrink:0}
 .nav-btn:hover{background:#e2e8f0}
 
 /* ── Main ── */
@@ -128,6 +129,12 @@ textarea{resize:vertical;min-height:60px}
 .upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:#eff6ff}
 .upload-zone input{display:none}
 
+/* 确保上传区域在主界面显示得体 */
+.main .upload-zone {border: 2px dashed var(--border);border-radius: 12px;padding: 10px 5px;text-align: center;background: #f8fafc;transition: all 0.2s ease;cursor: pointer;display: flex;flex-direction: column;align-items: center;justify-content: center;}
+.main .upload-zone:hover, .main .upload-zone.drag {border-color: var(--accent);background: #eff6ff;color: var(--accent);}
+.main .upload-zone svg {color: var(--muted);transition: color 0.2s;}
+.main .upload-zone:hover svg, .main .upload-zone.drag svg {color: var(--accent);}
+
 /* Spinner */
 .spinner{display:inline-block;width:16px;height:16px;border:2px solid #e2e8f0;
   border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite}
@@ -158,6 +165,7 @@ textarea{resize:vertical;min-height:60px}
   </div>
   <button class="nav-btn" onclick="openModal('settingsModal')">设置</button>
   <button class="nav-btn" onclick="openModal('rulesModal');loadRules()">规则</button>
+  <button class="nav-btn" onclick="openModal('skillsModal');loadSkills()">能力</button>
   <button class="nav-btn" onclick="openModal('bugsModal');loadBugs()">Bug记录</button>
   <button class="nav-btn" onclick="openModal('disclaimerModal')">免责声明</button>
   <button class="nav-btn" onclick="openModal('aboutModal');loadAbout()">关于</button>
@@ -168,13 +176,20 @@ textarea{resize:vertical;min-height:60px}
   <!-- File Card -->
   <div class="card">
     <div class="card-title">当前文件</div>
-    <div class="file-row">
-      <button class="btn btn-secondary" onclick="$id('logFileInput').click()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        选择文件…
-      </button>
+    <div 
+      class="upload-zone" 
+      id="dropZone" 
+      onclick="$id('logFileInput').click()"
+      ondragover="handleDragOver(event)"
+      ondragleave="handleDragLeave(event)"
+      ondrop="handleDrop(event)"
+    >
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40" style="margin-bottom: 10px; opacity: 0.6;">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <div id="fileHintText">点击或拖拽串口日志文件 (.log, .txt) 到此处</div>
+      <div class="path" id="filePath" style="margin-top: 8px; font-weight: 600;"></div>
       <input type="file" id="logFileInput" accept=".log,.txt,.pdf,*" onchange="onFilePicked(this)" style="display:none">
-      <span class="path" id="filePath">未选择文件</span>
     </div>
   </div>
 
@@ -205,26 +220,18 @@ textarea{resize:vertical;min-height:60px}
   <div class="modal-header"><h3>设置</h3><button class="modal-close" onclick="closeModal('settingsModal')">✕</button></div>
   <div class="modal-body">
     <div class="tabs">
-      <button class="tab-btn active" data-tab="tabApi">Cursor API</button>
+      <button class="tab-btn active" data-tab="tabApi">DeepSeek API</button>
       <button class="tab-btn" data-tab="tabClean">清洗与材料</button>
     </div>
     <!-- Tab: API -->
     <div class="tab-pane active" id="tabApi">
       <div class="form-group">
-        <label>API Key（Dashboard → Integrations）</label>
+        <label>DeepSeek API Key（platform.deepseek.com/api_keys）</label>
         <input type="password" id="cfgApiKey">
       </div>
       <div class="form-group">
-        <label>GitHub 仓库 URL（可克隆）</label>
-        <input type="text" id="cfgRepo">
-      </div>
-      <div class="form-group">
-        <label>分支 / ref（默认 main）</label>
-        <input type="text" id="cfgRef" placeholder="main">
-      </div>
-      <div class="form-group">
-        <label>模型 ID（可选，留空则用账号默认）</label>
-        <input type="text" id="cfgModel">
+        <label>模型（默认 deepseek-chat）</label>
+        <input type="text" id="cfgModel" placeholder="deepseek-chat">
       </div>
       <div class="form-group"><p class="hint">保存后写入项目 .env，下次「开始分析」后生效。</p></div>
     </div>
@@ -239,12 +246,12 @@ textarea{resize:vertical;min-height:60px}
         <textarea id="cfgCleanPrompt" rows="5"></textarea>
       </div>
       <div class="form-group">
-        <label>CURSOR_SUMMARY_MAX_CHARS</label>
+        <label>SUMMARY_MAX_CHARS</label>
         <input type="number" id="cfgSummaryChars" placeholder="90000">
         <p class="hint">建议 4000～240000</p>
       </div>
       <div class="form-group">
-        <label>CURSOR_CLEAN_MAX_CHARS</label>
+        <label>CLEAN_MAX_CHARS</label>
         <input type="number" id="cfgCleanChars" placeholder="24000">
         <p class="hint">建议 1000～80000</p>
       </div>
@@ -311,12 +318,64 @@ textarea{resize:vertical;min-height:60px}
     </div>
     <div id="importFileName" style="margin-top:8px;font-size:.82rem;color:var(--muted)"></div>
     <div id="importStatus" style="margin-top:12px;font-size:.85rem;display:none">
-      <span class="spinner"></span> <span id="importStatusText">正在调用 Cursor 提取规则…</span>
+      <span class="spinner"></span> <span id="importStatusText">正在调用 DeepSeek 提取规则…</span>
     </div>
   </div>
   <div class="modal-footer">
     <button class="btn btn-secondary" onclick="closeModal('importRulesModal')">取消</button>
     <button class="btn btn-primary" id="btnImport" onclick="importRules()" disabled>开始导入</button>
+  </div>
+</div></div>
+
+<!-- ═══ Skills Modal ═══ -->
+<div class="modal-overlay" id="skillsModal">
+<div class="modal modal-lg" style="max-width:900px">
+  <div class="modal-header"><h3>能力管理</h3><button class="modal-close" onclick="closeModal('skillsModal')">✕</button></div>
+  <div class="modal-body" style="padding:12px 20px">
+    <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">规则护栏命中后，Skills 会对命中片段做专家级 LLM 精准判定。双击行切换启用/禁用。</p>
+    <div style="display:flex;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <button class="btn btn-secondary btn-sm" onclick="loadSkills()">刷新</button>
+      <button class="btn btn-primary btn-sm" onclick="openModal('addSkillModal')">+ 添加自定义 Skill</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteSelectedSkill()">删除选中</button>
+      <span id="skillsCount" style="margin-left:auto;font-size:.78rem;color:var(--muted)"></span>
+    </div>
+    <div style="overflow-x:auto;max-height:340px;overflow-y:auto">
+      <table class="rules-table" id="skillsTable">
+        <thead><tr><th>ID</th><th>名称</th><th>触发类别</th><th>优先级</th><th>启用</th><th>来源</th></tr></thead>
+        <tbody id="skillsBody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal('skillsModal')">关闭</button></div>
+</div></div>
+
+<!-- ═══ Add Skill Modal ═══ -->
+<div class="modal-overlay" id="addSkillModal">
+<div class="modal modal-md">
+  <div class="modal-header"><h3>添加自定义 Skill</h3><button class="modal-close" onclick="closeModal('addSkillModal')">✕</button></div>
+  <div class="modal-body">
+    <div class="form-group"><label>Skill ID（英文标识）</label><input type="text" id="newSkillId" placeholder="my_custom_skill"></div>
+    <div class="form-group"><label>名称</label><input type="text" id="newSkillName" placeholder="自定义分析"></div>
+    <div class="form-group"><label>触发类别（逗号分隔）</label><input type="text" id="newSkillCats" placeholder="memory, crash"><div class="hint">对应规则 category，命中时自动触发</div></div>
+    <div class="form-group"><label>触发关键词（逗号分隔）</label><input type="text" id="newSkillKws" placeholder="oom-killer, panic"><div class="hint">日志行中出现关键词时也会触发</div></div>
+    <div style="display:flex;gap:12px">
+      <div class="form-group" style="flex:1"><label>上下文行数</label><input type="number" id="newSkillCtx" value="25"></div>
+      <div class="form-group" style="flex:1"><label>优先级 (1-10)</label><input type="number" id="newSkillPri" value="5"></div>
+    </div>
+    <div class="form-group"><label>Prompt 模板</label>
+      <textarea id="newSkillPrompt" rows="6" style="font-size:.8rem">你是XXX分析专家。以下日志片段包含可能的XXX异常。
+请严格按以下格式输出：
+【判定】确认异常 / 疑似误报 / 需更多上下文
+【置信度】高/中/低
+【关键发现】一句话概述
+【建议】一句话排查建议
+
+--- 日志片段 ---
+</textarea></div>
+  </div>
+  <div class="modal-footer">
+    <button class="btn btn-secondary" onclick="closeModal('addSkillModal')">取消</button>
+    <button class="btn btn-primary" onclick="saveNewSkill()">保存</button>
   </div>
 </div></div>
 
@@ -397,6 +456,44 @@ function toast(msg, type='info', ms=3500) {
   setTimeout(() => { d.style.opacity = '0'; d.style.transition = 'opacity .3s'; setTimeout(() => d.remove(), 300); }, ms);
 }
 
+/* ── File drop zone ── */
+function handleDragOver(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  $id('dropZone').classList.add('drag');
+}
+
+function handleDragLeave(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  $id('dropZone').classList.remove('drag');
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  $id('dropZone').classList.remove('drag');
+  
+  const files = e.dataTransfer.files;
+  if (files.length > 0) {
+    // 将文件赋值给隐藏的 input，并触发原有的逻辑
+    $id('logFileInput').files = files;
+    onFilePicked($id('logFileInput'));
+  }
+}
+
+// 修改原有的 onFilePicked 函数，让提示文字在选中文件后发生变化
+const _oldOnFilePicked = onFilePicked;
+onFilePicked = function(input) {
+  if (input.files.length) {
+    const file = input.files[0];
+    $id('fileHintText').style.display = 'none'; // 隐藏提示语
+    $id('filePath').textContent = '已选择: ' + file.name;
+    $id('filePath').classList.add('has-file');
+    currentFile = file; // 确保全局变量更新
+  }
+};
+
 /* ── Modal ── */
 function openModal(id) { $id(id).classList.add('open'); }
 function closeModal(id) { $id(id).classList.remove('open'); }
@@ -426,12 +523,10 @@ function onFilePicked(input) {
 async function loadConfig() {
   try {
     const r = await fetch('/api/config'); const d = await r.json();
-    $id('cfgRepo').value = d.CURSOR_GITHUB_REPO || '';
-    $id('cfgRef').value = d.CURSOR_GITHUB_REF || '';
-    $id('cfgModel').value = d.CURSOR_MODEL || '';
-    $id('cfgSummaryChars').value = d.CURSOR_SUMMARY_MAX_CHARS || '';
-    $id('cfgCleanChars').value = d.CURSOR_CLEAN_MAX_CHARS || '';
-    const maskedKey = d.CURSOR_API_KEY || '';
+    $id('cfgModel').value = d.DEEPSEEK_MODEL || '';
+    $id('cfgSummaryChars').value = d.SUMMARY_MAX_CHARS || '';
+    $id('cfgCleanChars').value = d.CLEAN_MAX_CHARS || '';
+    const maskedKey = d.DEEPSEEK_API_KEY || '';
     $id('cfgApiKey').value = maskedKey;
     $id('cfgApiKey').placeholder = maskedKey ? '已配置，点击可修改' : '未配置';
   } catch(e) { console.error(e); }
@@ -440,12 +535,10 @@ async function loadConfig() {
 async function saveSettings() {
   const data = {};
   const key = $id('cfgApiKey').value.trim();
-  if (key && !key.includes('****')) data.CURSOR_API_KEY = key;
-  const repo = $id('cfgRepo').value.trim(); if (repo) data.CURSOR_GITHUB_REPO = repo;
-  data.CURSOR_GITHUB_REF = $id('cfgRef').value.trim();
-  data.CURSOR_MODEL = $id('cfgModel').value.trim();
-  const sc = $id('cfgSummaryChars').value.trim(); if (sc) data.CURSOR_SUMMARY_MAX_CHARS = sc;
-  const cc = $id('cfgCleanChars').value.trim(); if (cc) data.CURSOR_CLEAN_MAX_CHARS = cc;
+  if (key && !key.includes('****')) data.DEEPSEEK_API_KEY = key;
+  data.DEEPSEEK_MODEL = $id('cfgModel').value.trim();
+  const sc = $id('cfgSummaryChars').value.trim(); if (sc) data.SUMMARY_MAX_CHARS = sc;
+  const cc = $id('cfgCleanChars').value.trim(); if (cc) data.CLEAN_MAX_CHARS = cc;
   try {
     const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
     const d = await r.json();
@@ -537,7 +630,7 @@ function onImportDrop(e) {
 async function importRules() {
   if (!importFile) return;
   $id('importStatus').style.display = 'flex';
-  $id('importStatusText').textContent = '正在调用 Cursor 提取规则（可能需要 1～2 分钟）…';
+  $id('importStatusText').textContent = '正在调用 DeepSeek 提取规则（可能需要 1～2 分钟）…';
   $id('btnImport').disabled = true;
   const fd = new FormData(); fd.append('file', importFile);
   try {
@@ -645,6 +738,84 @@ async function loadAbout() {
     $id('aboutVersion').textContent = '版本：' + d.version;
     $id('aboutAuthor').textContent = '作者：' + d.author;
   } catch(e) {}
+}
+
+/* ── Skills ── */
+let skillsData = [], selectedSkillId = null;
+
+async function loadSkills() {
+  try {
+    const r = await fetch('/api/skills'); const d = await r.json();
+    if (d.error) { toast(d.error, 'error'); return; }
+    skillsData = d.skills || []; renderSkills();
+    $id('skillsCount').textContent = `共 ${skillsData.length} 个 Skill`;
+  } catch(e) { toast('加载Skills失败: ' + e.message, 'error'); }
+}
+
+function renderSkills() {
+  const tbody = $id('skillsBody'); tbody.innerHTML = '';
+  selectedSkillId = null;
+  skillsData.forEach(s => {
+    const tr = document.createElement('tr');
+    tr.onclick = () => { selectedSkillId = s.id; $q('#skillsBody tr').forEach(r => r.classList.remove('selected')); tr.classList.add('selected'); };
+    tr.ondblclick = () => toggleSkill(s.id, !s.enabled);
+    const cats = (s.trigger_categories || []).join(', ');
+    const enTxt = s.enabled ? '✓' : '✗';
+    const enCls = s.enabled ? 'color:#16a34a' : 'color:#dc2626';
+    tr.innerHTML =
+      `<td style="font-family:monospace;font-size:.75rem">${esc(s.id)}</td>` +
+      `<td>${esc(s.name)}</td><td style="font-size:.75rem">${esc(cats)}</td>` +
+      `<td>${s.priority}</td><td style="${enCls};font-weight:700">${enTxt}</td>` +
+      `<td>${s.builtin ? '内置' : '自定义'}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function toggleSkill(id, enabled) {
+  try {
+    await fetch(`/api/skills/${id}/toggle`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({enabled})
+    });
+    loadSkills();
+  } catch(e) { toast('切换失败', 'error'); }
+}
+
+async function deleteSelectedSkill() {
+  if (!selectedSkillId) { toast('请先选中一个 Skill', 'info'); return; }
+  const s = skillsData.find(x => x.id === selectedSkillId);
+  if (s && s.builtin) { toast('内置 Skill 不可删除，可双击禁用', 'info'); return; }
+  if (!confirm(`确认删除 Skill「${selectedSkillId}」？`)) return;
+  try {
+    const r = await fetch(`/api/skills/${selectedSkillId}`, {method:'DELETE'});
+    const d = await r.json();
+    if (d.ok) { toast('已删除', 'success'); loadSkills(); }
+    else toast(d.error, 'error');
+  } catch(e) { toast('删除失败', 'error'); }
+}
+
+async function saveNewSkill() {
+  const id = $id('newSkillId').value.trim();
+  if (!id) { toast('Skill ID 不能为空', 'info'); return; }
+  const body = {
+    id,
+    name: $id('newSkillName').value.trim() || id,
+    trigger_categories: $id('newSkillCats').value.split(',').map(s=>s.trim()).filter(Boolean),
+    trigger_keywords: $id('newSkillKws').value.split(',').map(s=>s.trim()).filter(Boolean),
+    context_lines: parseInt($id('newSkillCtx').value) || 25,
+    priority: parseInt($id('newSkillPri').value) || 5,
+    prompt_template: $id('newSkillPrompt').value.trim() + '\n',
+    enabled: true,
+  };
+  try {
+    const r = await fetch('/api/skills', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const d = await r.json();
+    if (d.ok) { toast('Skill 已保存', 'success'); closeModal('addSkillModal'); loadSkills(); }
+    else toast(d.error || '保存失败', 'error');
+  } catch(e) { toast('保存失败', 'error'); }
 }
 
 /* ── Bug Records (DB) ── */

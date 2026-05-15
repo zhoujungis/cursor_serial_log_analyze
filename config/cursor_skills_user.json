@@ -1,0 +1,66 @@
+[
+  {
+    "id": "boot_analysis",
+    "name": "启动异常 / 重启循环分析",
+    "trigger_categories": [
+      "boot",
+      "init",
+      "startup"
+    ],
+    "trigger_keywords": [
+      "reboot",
+      "boot banner",
+      "Linux version",
+      "Starting kernel",
+      "rockchip_amp",
+      "init:",
+      "system reset",
+      "watchdog"
+    ],
+    "context_lines": 30,
+    "prompt_template": "你是嵌入式设备启动流程分析专家。以下日志片段包含疑似启动异常或重启循环。\n请分析：\n1. 是否存在多次启动（多段 boot banner / 内核时间戳归零）？\n2. 重启原因（watchdog / panic / 掉电 / 用户主动）？\n3. 重启间隔和次数？\n4. 启动过程中有哪些初始化失败？\n\n请严格按以下格式输出：\n【判定】确认异常 / 疑似误报 / 需更多上下文\n【置信度】高/中/低\n【关键发现】一句话概述\n【建议】一句话排查建议\n\n--- 日志片段 ---\n",
+    "enabled": true,
+    "priority": 2,
+    "category_patterns": []
+  },
+  {
+    "id": "power_thermal_analysis",
+    "name": "电源 / 温度异常分析",
+    "trigger_categories": [
+      "power_thermal"
+    ],
+    "trigger_keywords": [
+      "overheat",
+      "thermal",
+      "throttl",
+      "brown",
+      "undervoltage",
+      "power good fail",
+      "过温",
+      "欠压"
+    ],
+    "context_lines": 20,
+    "prompt_template": "你是电源与热管理分析专家。以下日志片段包含可能的电源/温度异常。\n请分析：\n1. 异常类型（过温降频/thermal shutdown/欠压/电源故障）？\n2. 温度或电压的具体数值（如日志中有）？\n3. 是否导致性能降级或关机？\n4. 环境因素还是硬件问题？\n\n请严格按以下格式输出：\n【判定】确认异常 / 疑似误报 / 需更多上下文\n【置信度】高/中/低\n【关键发现】一句话概述\n【建议】一句话排查建议\n\n--- 日志片段 ---\n",
+    "enabled": true,
+    "priority": 3,
+    "category_patterns": []
+  },
+  {
+    "id": "oom_analysis",
+    "name": "OOM / 内存分析",
+    "trigger_categories": [
+      "memory"
+    ],
+    "trigger_keywords": [
+      "oom-killer",
+      "Out of memory",
+      "oom_score",
+      "invoked oom"
+    ],
+    "context_lines": 30,
+    "prompt_template": "你是嵌入式 Linux 内存分析专家。以下日志片段包含可能的 OOM / 内存耗尽异常。\n请分析：\n1. OOM 是否真实触发？被杀进程是哪个？RSS/VSS 多大？\n2. 触发前是否有明显的内存泄漏迹象（持续增长）？\n3. 是单次还是多次 OOM？时间间隔多少？\n4. 对系统/业务的实际影响（进程重启？通信中断？）\n\n请严格按以下格式输出：\n【判定】确认异常 / 疑似误报 / 需更多上下文\n【置信度】高/中/低\n【关键发现】一句话概述\n【建议】一句话排查建议\n\n--- 日志片段 ---\n",
+    "enabled": false,
+    "priority": 1,
+    "category_patterns": []
+  }
+]

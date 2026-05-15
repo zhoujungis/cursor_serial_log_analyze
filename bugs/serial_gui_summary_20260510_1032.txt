@@ -1,0 +1,126 @@
+=== meta ===
+generated: 2026-05-10T10:32:21
+source: D:\AutoAnalizeLog\serial_capture\COM3_20260509_182106.log
+parsed_incidents: 478
+structured_mode: True
+material_truncated: True
+rule_hit_lines: 0
+
+=== Cursor summary ===
+
+材料已截断，以下仅基于已给内容总结。
+
+1) 概要一段
+
+COM3_20260509_182106.log 中未命中规则关键字，但结构化条目显示设备在 18:21:46 至 18:39:05 期间存在明显的云端通信、MQTT/DP 上报、RTC/P2P 会话、云存储、AV/BLE 初始化等多类异常。最主要问题是网络链路不稳定引发 HTTP 超时、DNS/连接失败、MQTT 发布失败，并进一步导致 DP 查询/上报失败和 RTC/P2P 通道异常；同时云存储返回订单不存在，AV 视频反转设置失败、BLE AT 命令失败也反复出现。日志中还夹杂串口截断/拼接、心跳和重复告警，需结合完整原始日志确认根因链路。
+
+2) 按严重程度归纳（合并同类）
+
+高：
+- 云端/MQTT/DP 通信链路异常：HTTP socket 超时、TCP/DNS 失败、MQTT 发布失败、DP 查询/上报失败大量重复，影响设备状态上报、配置拉取、云端交互。
+- RTC/P2P 会话与通道异常：connect keepalive 失败、channel over、send rc=-13，可能影响实时预览、回放或音视频传输稳定性。
+
+中：
+- 云存储订单/服务状态异常：云端返回 CAMERA_STORAGE_ORDER_NOT_EXISTED，设备侧记录 order expire or remote server error，影响云存储功能。
+- P2P 控制参数/音频状态异常：session cmd[16] 参数错误、audio not start，可能导致控制或音频链路不可用。
+- AV/BLE 初始化或配置失败：视频反转设置 error 1，BLE at+name/at+reset 命令失败，可能影响画面方向配置与蓝牙能力。
+- 内核/驱动 IRQ 异常提示：出现 Not Find any irq，需要确认是否为启动期噪声或真实驱动配置问题。
+
+低：
+- 编码器参数自动降级：ScalingList 不允许、CABAC 与 profile 不匹配后回退 CAVLC。
+- shm_init already 重复初始化告警。
+- 日志质量问题：串口拼接、截断、乱码、外层采集时间与设备时间不一致，影响自动分析准确性。
+
+3) Bug 清单
+
+【Bug编号】BUG-001
+【标题】云端 HTTP/DNS/TCP 链路频繁超时或连接失败
+【严重级别】高
+【类型】网络/云端通信
+【时间】2026-05-09 18:21:39 至 18:33:21 多次出现
+【证据/原文】[05-09 18:21:39 TUYA E][httpc.c:551] tcp connect failed a2.tuyacn.com:443 errno=150；[05-09 18:21:44 TUYA E][http_inf.c:51] Open session failed: https://h2.iot-dns.com/v1/dns_query (-7)；[05-09 18:22:04 TUYA E][httpc.c:177] http socket recv select time out. err:-100；[05-09 18:22:23 TUYA E][httpc.c:177] http socket recv select time out. err:-250
+【分析结论】设备访问涂鸦云端域名时出现 DNS 查询失败、TCP 连接失败和 HTTP 接收超时，属于上游链路级异常，会影响动态配置、定时器、升级、云存储等云端请求。
+
+【Bug编号】BUG-002
+【标题】MQTT 发布失败导致 DP 查询/上报失败风暴
+【严重级别】高
+【类型】MQTT/DP 上报
+【时间】2026-05-09 18:22:30、18:23:04、18:29:16、18:32:48、18:33:06、18:34:56 至 18:38:15 多次出现
+【证据/原文】[05-09 18:22:31 TUYA E][mqtt_client.c:1885] mqtt_pub_msg_with_qos err:-2312 errno:2；[05-09 18:22:31 TUYA E][smart_frame.c:1934] mqc_obj_dp_query err:-5890；[05-09 18:32:48 TUYA E][smart_frame.c:3524] dp_report err:-2312；[05-09 18:34:56 TUYA E][mqc_app.c:890] mqc_pub_async err:-1
+【分析结论】MQTT 发布失败后，smart_frame 层连续报 DP 查询和上报错误，说明设备云端状态同步不可靠。该问题可能是 BUG-001 网络链路异常的下游表现，也可能存在 MQTT 会话状态机未正确恢复的问题。
+
+【Bug编号】BUG-003
+【标题】RTC/P2P 会话传输异常，通道发送失败
+【严重级别】高
+【类型】RTC/P2P 音视频传输
+【时间】2026-05-09 18:21:46、18:24:03、18:31:17
+【证据/原文】41769 (null) ERROR:9244096: connect [1] / response [1] / complete [1] / keepalive [-1]；41771 (null) INFO:9244096: tcp 44 state change: STREAM -> FAILED；179212 (null) ERROR:9173564: rtc 00010002 channel 1 send rc = -13；179213 (null) ERROR:9173564: rtc 00010002 channel 2 send rc = -13
+【分析结论】RTC/P2P 传输链路出现 keepalive 失败、TCP 流状态 FAILED、channel over/send rc=-13，可能造成实时预览或回放中断。需与同时间段网络/MQTT异常关联排查。
+
+【Bug编号】BUG-004
+【标题】P2P 控制命令和音频状态参数错误
+【严重级别】中
+【类型】P2P 控制/音频状态机
+【时间】2026-05-09 18:22:07
+【证据/原文】[05-09 18:22:08 TUYA E][tuya_ipc_p2p.c:2001] param error or session cmd[16]；[05-09 18:22:08 TUYA E][tuya_ipc_p2p.c:2098] param error or audio not start
+【分析结论】P2P 控制命令处理时参数或会话状态不匹配，音频链路未启动却收到相关操作，可能是客户端命令时序异常、服务端状态同步异常或设备侧状态机保护不足。
+
+【Bug编号】BUG-005
+【标题】云存储订单不存在或过期导致云存储流程异常
+【严重级别】中
+【类型】云存储/账号权益
+【时间】2026-05-09 18:35:23、18:35:54、18:36:12、18:36:44、18:38:02、18:38:17
+【证据/原文】Decode Rev:{"result":{"errorCode":"CAMERA_STORAGE_ORDER_NOT_EXISTED"},"t":1778322924,"success":true}；[cloud_operation.c:511] errorCode:CAMERA_STORAGE_ORDER_NOT_EXISTED；[tuya_ipc_cloud_storage.c:553] order expire or remote server error
+【分析结论】云端明确返回云存储订单不存在，设备侧按订单过期或远端错误处理。需确认账号/设备云存储套餐状态，若业务上应有云存储权益，则为云端授权或设备绑定关系异常。
+
+【Bug编号】BUG-006
+【标题】视频反转设置失败
+【严重级别】中
+【类型】AV/视频配置
+【时间】2026-05-09 18:33:46、18:35:50、18:36:08、18:36:41、18:38:00、18:38:12、18:39:05
+【证据/原文】[05-09 18:33:46.751 AV]: gz_hal_video_set_inversion error 1；[05-09 18:35:50.794 AV]: gz_hal_video_set_inversion error 1；[05-09 18:39:06.758 AV]: gz_hal_video_set_inversion error 1
+【分析结论】视频反转配置多次返回 error 1，可能导致画面方向设置失败。需确认当前硬件/ISP/编码通路是否支持该配置，以及调用时机是否早于视频模块就绪。
+
+【Bug编号】BUG-007
+【标题】BLE 启动 AT 命令失败
+【严重级别】中
+【类型】BLE/串口 AT 控制
+【时间】2026-05-09 18:33:47
+【证据/原文】[05-09 18:33:47.228 AV]: gz_hal_ble_start cmd at+name error；[05-09 18:33:47.269 AV]: gz_hal_ble_start cmd at+name error；[05-09 18:33:47.314 AV]: gz_hal_ble_start cmd at+reset error
+【分析结论】BLE 初始化阶段 at+name 与 at+reset 命令失败，可能是 BLE 模块未响应、串口通信异常、AT 命令格式不兼容或模块状态未复位完成。
+
+【Bug编号】BUG-008
+【标题】内核/驱动 IRQ 查找失败日志与业务日志拼接出现
+【严重级别】中
+【类型】驱动/日志完整性
+【时间】2026-05-09 18:38:15
+【证据/原文】18:38:15 TUYA D][smart_frame.c:4[    3.850202] Error: Not Find any irq,check me drivers/irqchip/irq-ingenic-chip.c 290.
+【分析结论】日志显示 IRQ 查找失败，同时与 TUYA 日志发生拼接，既可能是启动阶段驱动错误被串口截断后混入，也可能是日志采集串扰。需在完整启动日志中确认该 IRQ 错误是否真实影响外设中断。
+
+【Bug编号】BUG-009
+【标题】编码器配置被自动调整
+【严重级别】低
+【类型】视频编码配置
+【时间】2026-05-09 18:33:46、18:35:50、18:36:07、18:36:41、18:37:59、18:38:12、18:39:05
+【证据/原文】[WARNING]: The specified ScalingList is not allowed; it will be adjusted；[WARNING]: CABAC encoding is not allowed with this profile; CAVLC will be used instead
+【分析结论】当前编码参数与所选 profile 不完全匹配，系统自动调整 ScalingList 并从 CABAC 回退到 CAVLC。短期可能不阻塞功能，但可能影响码率、画质或编码效率。
+
+【Bug编号】BUG-010
+【标题】共享内存重复初始化告警
+【严重级别】低
+【类型】资源初始化/日志告警
+【时间】2026-05-09 18:33:46 至 18:38:13 多次出现
+【证据/原文】warn: shm_init,53shm init already
+【分析结论】共享内存初始化逻辑被重复调用，当前仅表现为告警。若伴随模块重启、资源泄漏或状态错乱，需要进一步排查调用链；否则可作为日志降噪或初始化幂等性优化项。
+
+4) 后续排查顺序
+
+1. 优先排查网络基础链路：Wi-Fi 信号、路由器到 a2.tuyacn.com/h2.iot-dns.com 的 DNS、TCP 443 连通性、丢包和时延。
+2. 对齐 MQTT 会话状态：确认 -2312、-5890、-1 对应 SDK 错误码含义，检查断网后重连、会话恢复、队列清理和 DP 重试策略。
+3. 关联 RTC/P2P 异常与网络异常时间线：重点看 18:21:46、18:24:03、18:31:17 前后的网络状态、P2P 会话状态和音视频发送队列。
+4. 核查云存储权益：确认设备 ID、账号绑定、云存储订单状态，判断 CAMERA_STORAGE_ORDER_NOT_EXISTED 是否符合预期。
+5. 检查 P2P 控制命令时序：复现 cmd[16]、audio not start，确认客户端是否在音频未启动时下发控制，设备侧是否需要状态保护。
+6. 排查 AV 初始化：确认 gz_hal_video_set_inversion 调用时机、硬件支持能力、参数范围和失败码 error 1 的定义。
+7. 排查 BLE 模块：抓取 AT 串口交互，确认 at+name、at+reset 失败时 BLE 模块供电、波特率、复位脚和固件版本。
+8. 获取完整未截断串口日志：重点补齐 18:21:31 之前、18:39:05 之后以及启动阶段日志，验证 IRQ 错误和串口拼接是否为真实问题。
+9. 优化日志规则：将 http timeout、mqtt err、dp_report err、rtc channel send rc、CAMERA_STORAGE_ORDER_NOT_EXISTED、gz_hal_video_set_inversion error、BLE AT error 加入规则匹配，避免“规则命中 0 行”漏报。

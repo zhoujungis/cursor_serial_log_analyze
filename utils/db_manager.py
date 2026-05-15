@@ -10,9 +10,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-_ROOT = Path(__file__).resolve().parent
-load_dotenv(_ROOT / ".env")
-load_dotenv(Path.cwd() / ".env")
+_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_ROOT / "config/.env")
+load_dotenv(Path.cwd() / "config/.env")
 
 
 def _pg_params() -> dict:

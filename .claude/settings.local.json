@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m py_compile main.py)",
+      "Bash(python -m py_compile desktop_serial_log_analyzer.py)",
+      "Bash(python -m py_compile web_server.py)",
+      "Bash(Get-ChildItem -Path \"D:\\\\AutoAnalizeLog\" -File)",
+      "Bash(Select-Object Name)",
+      "Bash(mkdir -p \"D:\\\\AutoAnalizeLog\\\\config\")",
+      "Bash(mv \"D:\\\\AutoAnalizeLog\\\\.env\" \"D:\\\\AutoAnalizeLog\\\\config\\\\.env\")",
+      "Bash(mv \"D:\\\\AutoAnalizeLog\\\\cursor_skills_user.json\" \"D:\\\\AutoAnalizeLog\\\\config\\\\cursor_skills_user.json\")",
+      "Bash(mv \"D:\\\\AutoAnalizeLog\\\\serial_rules_user.json\" \"D:\\\\AutoAnalizeLog\\\\config\\\\serial_rules_user.json\")",
+      "Bash(git *)",
+      "Bash(pip install *)"
+    ]
+  }
+}

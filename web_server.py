@@ -26,15 +26,15 @@ from desktop_serial_log_analyzer import (
     WorkerConfig,
     _BUILTIN_RULE_CATEGORIES,
     _USER_RULES_PATH,
-    _cursor_submit,
+    _deepseek_submit,
     _default_cleaning_prompt,
     _rule_import_prompt,
     _rules_from_llm_response,
     _run_analyze,
     _tabular_rules_source_to_plain,
-    apply_cursor_env_to_dotenv,
+    apply_deepseek_env_to_dotenv,
 )
-from serial_alert_rules import (
+from utils.serial_alert_rules import (
     RAW_ALERT_RULE_DEFINITIONS,
     load_user_rules_raw,
     save_user_rules_raw,
@@ -57,12 +57,10 @@ def index():
 # ── Config ──────────────────────────────────────────────────────────
 
 _CONFIG_KEYS = [
-    "CURSOR_API_KEY",
-    "CURSOR_GITHUB_REPO",
-    "CURSOR_GITHUB_REF",
-    "CURSOR_MODEL",
-    "CURSOR_SUMMARY_MAX_CHARS",
-    "CURSOR_CLEAN_MAX_CHARS",
+    "DEEPSEEK_API_KEY",
+    "DEEPSEEK_MODEL",
+    "SUMMARY_MAX_CHARS",
+    "CLEAN_MAX_CHARS",
 ]
 
 
@@ -71,7 +69,7 @@ def get_config():
     cfg = {}
     for k in _CONFIG_KEYS:
         v = os.environ.get(k, "")
-        if k == "CURSOR_API_KEY" and v:
+        if k == "DEEPSEEK_API_KEY" and v:
             cfg[k] = v[:8] + "****" + v[-4:] if len(v) > 12 else "****"
         else:
             cfg[k] = v
@@ -87,14 +85,14 @@ def save_config():
             updates[k] = str(data[k]).strip()
     if not updates:
         return jsonify({"error": "无有效配置项"}), 400
-    apply_cursor_env_to_dotenv(updates)
+    apply_deepseek_env_to_dotenv(updates)
     return jsonify({"ok": True, "saved": list(updates.keys())})
 
 
 @app.route("/api/config/raw_key", methods=["GET"])
 def get_raw_key():
     """Return full unmasked API key (for the settings form to re-save)."""
-    return jsonify({"CURSOR_API_KEY": os.environ.get("CURSOR_API_KEY", "")})
+    return jsonify({"DEEPSEEK_API_KEY": os.environ.get("DEEPSEEK_API_KEY", "")})
 
 
 # ── Rules ───────────────────────────────────────────────────────────
@@ -158,16 +156,15 @@ def import_rules():
     if suf not in (".xlsx", ".xlsm", ".csv"):
         return jsonify({"error": "仅支持 .xlsx/.xlsm/.csv"}), 400
 
-    api_key = os.environ.get("CURSOR_API_KEY", "").strip()
-    repo = os.environ.get("CURSOR_GITHUB_REPO", "").strip()
-    if not api_key or not repo:
-        return jsonify({"error": "请先配置 CURSOR_API_KEY 与 CURSOR_GITHUB_REPO"}), 400
+    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+    if not api_key:
+        return jsonify({"error": "请先配置 DEEPSEEK_API_KEY"}), 400
 
     tmp = _UPLOAD_DIR / f"{uuid.uuid4().hex}{suf}"
     try:
         f.save(str(tmp))
         plain = _tabular_rules_source_to_plain(tmp)
-        llm_text = _cursor_submit(_rule_import_prompt(plain))
+        llm_text = _deepseek_submit(_rule_import_prompt(plain))
         new_items = _rules_from_llm_response(llm_text)
         if not new_items:
             return jsonify({"error": "模型未返回任何可用规则"}), 422
@@ -292,7 +289,7 @@ def _json_serial(obj):
 @app.route("/api/bugs", methods=["GET"])
 def api_list_bugs():
     try:
-        from db_manager import list_bugs, count_bugs, init_db
+        from utils.db_manager import list_bugs, count_bugs, init_db
         init_db()
         verdict = request.args.get("verdict")
         source = request.args.get("source")
@@ -312,13 +309,13 @@ def api_list_bugs():
 def api_bug_detail(bug_id: int):
     if request.method == "DELETE":
         try:
-            from db_manager import delete_bug
+            from utils.db_manager import delete_bug
             ok = delete_bug(bug_id)
             return jsonify({"ok": ok})
         except Exception as e:
             return jsonify({"error": str(e)[:500]}), 500
     try:
-        from db_manager import get_bug
+        from utils.db_manager import get_bug
         b = get_bug(bug_id)
         if not b:
             return jsonify({"error": "未找到"}), 404
@@ -333,7 +330,7 @@ def api_bug_detail(bug_id: int):
 @app.route("/api/bugs/<int:bug_id>/verdict", methods=["PUT"])
 def api_update_verdict(bug_id: int):
     try:
-        from db_manager import update_verdict
+        from utils.db_manager import update_verdict
         data = request.get_json(force=True) or {}
         v = data.get("verdict", "待定")
         notes = data.get("notes", "")
@@ -348,11 +345,63 @@ def api_update_verdict(bug_id: int):
 @app.route("/api/bugs/test", methods=["GET"])
 def api_test_db():
     try:
-        from db_manager import test_connection
+        from utils.db_manager import test_connection
         ok, msg = test_connection()
         return jsonify({"ok": ok, "msg": msg})
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)[:500]})
+
+
+# ── Skills API ──────────────────────────────────────────────────────
+
+@app.route("/api/skills", methods=["GET"])
+def api_list_skills():
+    try:
+        from utils.cursor_skills import get_all_skills
+        from dataclasses import asdict
+        skills = get_all_skills()
+        return jsonify({"skills": [asdict(s) for s in skills]})
+    except Exception as e:
+        return jsonify({"error": str(e)[:500]}), 500
+
+
+@app.route("/api/skills", methods=["POST"])
+def api_add_skill():
+    try:
+        from utils.cursor_skills import add_user_skill
+        from dataclasses import asdict
+        data = request.get_json(force=True)
+        if not data or not data.get("id"):
+            return jsonify({"error": "id 必填"}), 400
+        s = add_user_skill(data)
+        return jsonify({"ok": True, "skill": asdict(s)})
+    except Exception as e:
+        return jsonify({"error": str(e)[:500]}), 500
+
+
+@app.route("/api/skills/<skill_id>", methods=["DELETE"])
+def api_delete_skill(skill_id: str):
+    try:
+        from utils.cursor_skills import get_skill_by_id, delete_user_skill
+        s = get_skill_by_id(skill_id)
+        if s and s.builtin:
+            return jsonify({"error": "内置 Skill 不可删除，可禁用"}), 400
+        ok = delete_user_skill(skill_id)
+        return jsonify({"ok": ok})
+    except Exception as e:
+        return jsonify({"error": str(e)[:500]}), 500
+
+
+@app.route("/api/skills/<skill_id>/toggle", methods=["PUT"])
+def api_toggle_skill(skill_id: str):
+    try:
+        from utils.cursor_skills import toggle_skill
+        data = request.get_json(force=True) or {}
+        enabled = bool(data.get("enabled", True))
+        ok = toggle_skill(skill_id, enabled)
+        return jsonify({"ok": ok})
+    except Exception as e:
+        return jsonify({"error": str(e)[:500]}), 500
 
 
 # ── Meta ────────────────────────────────────────────────────────────
