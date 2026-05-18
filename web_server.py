@@ -17,6 +17,8 @@ import uuid
 import webbrowser
 from pathlib import Path
 
+import sys
+
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from desktop_serial_log_analyzer import (
@@ -40,7 +42,12 @@ from utils.serial_alert_rules import (
     save_user_rules_raw,
 )
 
-app = Flask(__name__, static_folder="static")
+if getattr(sys, "frozen", False):
+    _STATIC = os.path.join(sys._MEIPASS, "static")
+else:
+    _STATIC = "static"
+
+app = Flask(__name__, static_folder=_STATIC)
 
 _UPLOAD_DIR = Path(tempfile.gettempdir()) / "serial_log_web_uploads"
 _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

@@ -11,7 +11,8 @@
       "Bash(mv \"D:\\\\AutoAnalizeLog\\\\cursor_skills_user.json\" \"D:\\\\AutoAnalizeLog\\\\config\\\\cursor_skills_user.json\")",
       "Bash(mv \"D:\\\\AutoAnalizeLog\\\\serial_rules_user.json\" \"D:\\\\AutoAnalizeLog\\\\config\\\\serial_rules_user.json\")",
       "Bash(git *)",
-      "Bash(pip install *)"
+      "Bash(pip install *)",
+      "Bash(pyinstaller *)"
     ]
   }
 }
