@@ -12,7 +12,11 @@
       "Bash(mv \"D:\\\\AutoAnalizeLog\\\\serial_rules_user.json\" \"D:\\\\AutoAnalizeLog\\\\config\\\\serial_rules_user.json\")",
       "Bash(git *)",
       "Bash(pip install *)",
-      "Bash(pyinstaller *)"
+      "Bash(pyinstaller *)",
+      "Bash(Get-ChildItem -Recurse -Depth 3 \"D:\\\\AutoAnalizeLog\")",
+      "Bash(Select-Object FullName, Length, Mode)",
+      "Bash(Format-Table -AutoSize)",
+      "Bash(python *)"
     ]
   }
 }

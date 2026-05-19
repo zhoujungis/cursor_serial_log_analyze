@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-桌面 GUI（tkinter）：打开串口/设备 .log/.txt，规则扫描 + Cloud 清洗节选 + LLM 总结。
+桌面 GUI（PyQt6）：打开串口/设备 .log/.txt，规则扫描 + Cloud 清洗节选 + LLM 总结。
 清洗文案、节选/材料体量：菜单「设置」；串口匹配规则与表格导入：菜单「规则」。依赖：requests、python-dotenv、pypdf（仅 .pdf）、openpyxl（.xlsx/.xlsm）、csv（.csv 规则导入）。
 
 运行：python desktop_serial_log_analyzer.py
@@ -20,8 +20,6 @@ import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, scrolledtext, ttk
-import tkinter as tk
 
 import requests
 from dotenv import load_dotenv
@@ -33,6 +31,7 @@ from utils.serial_alert_rules import (
 )
 
 _BUILTIN_RULE_CATEGORIES: frozenset[str] = frozenset(t[1] for t in RAW_ALERT_RULE_DEFINITIONS)
+
 
 def _app_root() -> Path:
     """源码：项目目录；PyInstaller exe：exe 所在目录（.env / 用户规则与输出持久化）。"""
@@ -142,7 +141,7 @@ def short_title(log_line: str, max_len: int = 72) -> str:
     s = (log_line or "").strip().replace("\n", " ")
     if len(s) <= max_len:
         return s
-    return s[: max_len - 1] + "\u2026"
+    return s[: max_len - 1] + "…"
 
 
 def parse_report_text(text: str, source_file: str) -> list[Incident]:
@@ -181,12 +180,12 @@ def _T(*parts: str) -> str:
 def _repair_mojibake_text(text: str) -> str:
     if not isinstance(text, str) or not text:
         return text
-    mojibake_hits = ("\u00c3", "\u00c2", "\u00e6", "\u00e5", "\u00e4")
+    mojibake_hits = ("Ã", "Â", "æ", "å", "ä")
     if not any(ch in text for ch in mojibake_hits):
         return text
     try:
         fixed = text.encode("latin1", errors="strict").decode("utf-8", errors="strict")
-        if fixed.count("\ufffd") <= text.count("\ufffd"):
+        if fixed.count("�") <= text.count("�"):
             return fixed
     except Exception:
         return text
@@ -194,10 +193,10 @@ def _repair_mojibake_text(text: str) -> str:
 
 
 def _deepseek_submit(prompt: str) -> str:
-    """\u8c03\u7528 DeepSeek API\uff0c\u8fd4\u56de\u5b8c\u6574\u54cd\u5e94\u6587\u672c\u3002"""
+    """调用 DeepSeek API，返回完整响应文本。"""
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
-        raise SystemExit("\u8bf7\u5728 .env \u4e2d\u8bbe\u7f6e DEEPSEEK_API_KEY")
+        raise RuntimeError("请在 .env 中设置 DEEPSEEK_API_KEY")
 
     model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat").strip() or "deepseek-chat"
     headers = {
@@ -227,7 +226,6 @@ def _xlsx_workbook_to_plain(path: Path, max_chars: int = 36_000) -> str:
         from openpyxl import load_workbook
     except ImportError as e:
         raise RuntimeError("缺少 openpyxl，请执行：pip install openpyxl") from e
-    # 部分工作簿在 read_only 下仅迭代到首行，故用常规模式以保证压测类 xlsx 读全。
     wb = load_workbook(str(path), read_only=False, data_only=True)
     parts: list[str] = []
     try:
@@ -454,37 +452,33 @@ def build_summarize_prompt_serial(
     if truncated:
         note_trunc = (
             "\n"
-            "\u6ce8\u610f\uff1a\u6750\u6599\u5df2\u622a\u65ad\uff0c\u8bf7\u5728\u6587\u9996\u8bf4\u660e\u300c\u6750\u6599\u5df2\u622a\u65ad\u300d\u5e76\u57fa\u4e8e\u5df2\u7ed9\u5185\u5bb9\u603b\u7ed3\u3002\n"
+            "注意：材料已截断，请在文首说明「材料已截断」并基于已给内容总结。\n"
         )
     mat_desc = (
-        "\u7ed3\u6784\u5316\u544a\u8b66/\u5206\u6790\u6761\u76ee"
+        "结构化告警/分析条目"
         if structured
-        else (
-            "\u539f\u6587\u8282\u9009"
-            "\uff08\u672a\u80fd\u89e3\u6790\u884c\u53f7\u683c\u5f0f\uff09"
-        )
+        else "原文节选（未能解析行号格式）"
     )
     return _T(
-        "\u4f60\u662f\u5d4c\u5165\u5f0f/\u8bbe\u5907\u65e5\u5fd7\u5206\u6790\u4e13\u5bb6\u3002"
-        "\u4ee5\u4e0b\u4e3a\u4ece\u4e32\u53e3\u539f\u59cb\u65e5\u5fd7\u6587\u4ef6\u4e2d\u63d0\u53d6\u7684",
+        "你是嵌入式/设备日志分析专家。以下为从串口原始日志文件中提取的",
         mat_desc,
-        "\u3002\n\n",
-        "\u6d89\u53ca\u7684\u6587\u4ef6\uff1a\n",
+        "。\n\n",
+        "涉及的文件：\n",
         "\n".join(f"- {x}" for x in log_files),
         note_trunc,
         "\n\n",
-        "\u8bf7\u4ec5\u7528\u7b80\u4f53\u4e2d\u6587\u8f93\u51fa\u7eaf\u6587\u672c\u3002\u6309\u4e0b\u5217\u7ed3\u6784\u64b0\u5199\u4fbf\u4e8e\u62f7\u8d1d\u5230 Bug \u5355/\u90ae\u4ef6\uff1a\n",
-        "\n1) \u6982\u8981\u4e00\u6bb5\n",
-        "2) \u6309\u4e25\u91cd\u7a0b\u5ea6\u5f52\u7eb3\uff08\u5408\u5e76\u540c\u7c7b\uff09\n",
-        "3) Bug \u6e05\u5355\u6bcf\u6761\u5fc5\u542b\u5b57\u6bb5\uff1a",
-        "\u3010Bug\u7f16\u53f7\u3011 ",
-        "\u3010\u6807\u9898\u3011 ",
-        "\u3010\u4e25\u91cd\u7ea7\u522b\u3011 ",
-        "\u3010\u7c7b\u578b\u3011 ",
-        "\u3010\u65f6\u95f4\u3011 ",
-        "\u3010\u8bc1\u636e/\u539f\u6587\u3011 ",
-        "\u3010\u5206\u6790\u7ed3\u8bba\u3011\n",
-        "4) \u540e\u7eed\u6392\u67e5\u987a\u5e8f\uff08\u5e8f\u53f7\u5217\u8868\uff09\n\n",
+        "请仅用简体中文输出纯文本。按下列结构撰写便于拷贝到 Bug 单/邮件：\n",
+        "\n1) 概要一段\n",
+        "2) 按严重程度归纳（合并同类）\n",
+        "3) Bug 清单每条款必含字段：",
+        "【Bug编号】 ",
+        "【标题】 ",
+        "【严重级别】 ",
+        "【类型】 ",
+        "【时间】 ",
+        "【证据/原文】 ",
+        "【分析结论】\n",
+        "4) 后续排查顺序（序号列表）\n\n",
         "--- material ---\n",
         material,
     )
@@ -492,7 +486,7 @@ def build_summarize_prompt_serial(
 
 _USER_RULES_PATH = _ROOT / "config/serial_rules_user.json"
 
-APP_VERSION = "V 0.5"
+APP_VERSION = "V 0.6"
 APP_AUTHOR = "zhoujun@glazero.com"
 DISCLAIMER_TEXT = (
     "本次分析结果只对本次导入的串口 log 有效；\n"
@@ -560,9 +554,9 @@ class WorkerConfig:
 def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
     from utils.serial_alert_rules import build_compiled_rules, match_log_alerts_for_rules
 
-    def _raw_material(cleaned: str, budget: int, name: str) -> tuple[str, bool]:
+    def _raw_material(text: str, budget: int, name: str) -> tuple[str, bool]:
         truncated = False
-        head = "## raw excerpt: " + name + "\n\n" + cleaned.strip()
+        head = "## raw excerpt: " + name + "\n\n" + text.strip()
         if len(head) > budget:
             material = head[:budget].strip()
             truncated = True
@@ -573,67 +567,19 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
         return material, truncated
 
     try:
+        # ══════════════════════════════════════════════════════════
+        # 阶段 1：读取 + 规范化 + Cloud 清洗
+        # ══════════════════════════════════════════════════════════
         q.put(("progress", 5, "读取文件…"))
         raw = _read_file_text(cfg.file_path)
         if not raw.strip():
             q.put(("err", "文件为空或无法解码。"))
             return
 
-        q.put(("progress", 15, "规范化换行（不做本地清洗）…"))
+        q.put(("progress", 10, "规范化换行…"))
         cleaned = raw.replace("\r\n", "\n").replace("\r", "\n")
 
-        rules = build_compiled_rules(
-            env_json_path=None,
-            user_json_path=_USER_RULES_PATH,
-        )
-
-        q.put(("progress", 28, "规则扫描…"))
-        all_lines = cleaned.splitlines()
-        buf: list[str] = []
-        hit_lines = 0
-        hit_categories: set[str] = set()
-        hit_line_map: dict[str, list[int]] = {}
-        hit_lines_with_text: list[tuple[int, str]] = []
-        for i, line in enumerate(all_lines):
-            hits = match_log_alerts_for_rules(line, rules)
-            if not hits:
-                continue
-            hit_lines += 1
-            hit_lines_with_text.append((i, line))
-            for h in hits:
-                hit_categories.add(h["cat"])
-                hit_line_map.setdefault(h["cat"], []).append(i)
-            if len(buf) < 120:
-                labs = "、".join(h["label"] for h in hits)
-                buf.append(f"行 {i+1}: [{labs}] {line[:400]}{'…' if len(line) > 400 else ''}")
-        if not buf:
-            rule_block = "（本文件未命中内置/自定义规则关键字模式）"
-        else:
-            rule_block = "\n".join(buf)
-
-        # ── Skills 智能判定 ──
-        skill_block = ""
-        if hit_categories:
-            q.put(("progress", 40, "Skills 智能判定…"))
-            try:
-                from utils.cursor_skills import run_all_skills, format_skill_results
-                skill_results = run_all_skills(
-                    all_lines=all_lines,
-                    hit_categories=hit_categories,
-                    hit_line_map=hit_line_map,
-                    hit_lines_with_text=hit_lines_with_text,
-                    llm_fn=_deepseek_submit,
-                    max_skills=5,
-                    progress_fn=lambda msg: q.put(("progress", 45, msg)),
-                )
-                skill_block = format_skill_results(skill_results)
-            except Exception as e:
-                skill_block = f"（Skills 判定跳过：{e}）"
-
-        q.put(("progress", 55, "解析异常行（关键词/栈）…"))
-        incidents: list[Incident] = parse_report_text(cleaned, cfg.file_path.name)
-
-        q.put(("progress", 60, "调用 Cloud 清洗节选…"))
+        q.put(("progress", 15, "调用 Cloud 清洗节选（前置）…"))
         try:
             clean_limit = int(os.environ.get("CLEAN_MAX_CHARS", "24000"))
         except ValueError:
@@ -646,38 +592,139 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
         except Exception as e:
             llm_clean_summary = f"（Cloud 清洗失败：{e}）"
 
-        q.put(("progress", 68, "组装分析材料…"))
-        budget = max(4000, min(cfg.max_chars, 240_000))
-        if incidents:
-            material, truncated = build_material_for_prompt(incidents, budget)
-        else:
-            material, truncated = _raw_material(cleaned, budget, cfg.file_path.name)
+        # ══════════════════════════════════════════════════════════
+        # 阶段 2：两条线并行 —— A) 规则+Skills  B) LLM上下文
+        # ══════════════════════════════════════════════════════════
+        q.put(("progress", 35, "规则扫描 + LLM 上下文并行处理…"))
+
+        # 两路线程共享的结果容器
+        line_a: dict = {}
+        line_b: dict = {}
+
+        def _line_a_rules_and_skills() -> None:
+            """线 A：规则匹配 → Skills 智能判定"""
+            rules = build_compiled_rules(
+                env_json_path=None,
+                user_json_path=_USER_RULES_PATH,
+            )
+            all_lines = cleaned.splitlines()
+            buf: list[str] = []
+            hit_lines = 0
+            hit_categories: set[str] = set()
+            hit_line_map: dict[str, list[int]] = {}
+            hit_lines_with_text: list[tuple[int, str]] = []
+
+            for i, line in enumerate(all_lines):
+                hits = match_log_alerts_for_rules(line, rules)
+                if not hits:
+                    continue
+                hit_lines += 1
+                hit_lines_with_text.append((i, line))
+                for h in hits:
+                    hit_categories.add(h["cat"])
+                    hit_line_map.setdefault(h["cat"], []).append(i)
+                if len(buf) < 120:
+                    labs = "、".join(h["label"] for h in hits)
+                    buf.append(f"行 {i+1}: [{labs}] {line[:400]}{'…' if len(line) > 400 else ''}")
+
+            if not buf:
+                rule_block = "（本文件未命中内置/自定义规则关键字模式）"
+            else:
+                rule_block = "\n".join(buf)
+
+            skill_block = ""
+            if hit_categories:
+                q.put(("progress", 38, "Skills 智能判定…"))
+                try:
+                    from utils.cursor_skills import run_all_skills, format_skill_results
+                    skill_results = run_all_skills(
+                        all_lines=all_lines,
+                        hit_categories=hit_categories,
+                        hit_line_map=hit_line_map,
+                        hit_lines_with_text=hit_lines_with_text,
+                        llm_fn=_deepseek_submit,
+                        max_skills=5,
+                        progress_fn=lambda msg: q.put(("progress", 42, msg)),
+                    )
+                    skill_block = format_skill_results(skill_results)
+                except Exception as e:
+                    skill_block = f"（Skills 判定跳过：{e}）"
+
+            line_a["rule_block"] = rule_block
+            line_a["skill_block"] = skill_block
+            line_a["hit_lines"] = hit_lines
+
+        def _line_b_llm_context() -> None:
+            """线 B：解析异常行 → 结构化材料 + 历史判别经验"""
+            incidents: list[Incident] = parse_report_text(cleaned, cfg.file_path.name)
+
+            budget = max(4000, min(cfg.max_chars, 240_000))
+            if incidents:
+                material, truncated = build_material_for_prompt(incidents, budget)
+            else:
+                material, truncated = _raw_material(cleaned, budget, cfg.file_path.name)
+
+            learning_ctx = ""
+            try:
+                from utils.db_manager import get_learning_context
+                learning_ctx = get_learning_context()
+            except Exception:
+                pass
+
+            line_b["incidents"] = incidents
+            line_b["material"] = material
+            line_b["truncated"] = truncated
+            line_b["structured"] = bool(incidents)
+            line_b["learning_ctx"] = learning_ctx
+
+        t_a = threading.Thread(target=_line_a_rules_and_skills, daemon=True)
+        t_b = threading.Thread(target=_line_b_llm_context, daemon=True)
+        t_a.start()
+        t_b.start()
+        t_a.join()
+        t_b.join()
+
+        # ══════════════════════════════════════════════════════════
+        # 阶段 3：合并两线产物 → 组装最终材料
+        # ══════════════════════════════════════════════════════════
+        q.put(("progress", 65, "组装分析材料…"))
 
         prefix_parts: list[str] = []
 
-        # 持续学习：注入历史人工判别作为上下文
-        try:
-            from utils.db_manager import get_learning_context
-            learning_ctx = get_learning_context()
-            if learning_ctx:
-                prefix_parts.append(learning_ctx)
-                q.put(("progress", 69, "已加载历史判别经验…"))
-        except Exception:
-            pass
+        # 清洗输出（最前置，作为全局上下文）
+        prefix_parts.append(
+            "## Cloud 清洗输出（前置）\n\n" + (llm_clean_summary or "（Cloud 未返回内容）")
+        )
 
+        # 用户侧重点
         if cfg.user_analysis_notes.strip():
             prefix_parts.append(
                 "## 用户侧重点（清洗/分析）\n\n" + cfg.user_analysis_notes.strip()
             )
+
+        # 规则命中摘要
         prefix_parts.append(
-            f"## 规则命中摘要（共约 {hit_lines} 行触发规则）\n\n" + rule_block
+            f"## 规则命中摘要（共约 {line_a.get('hit_lines', 0)} 行触发规则）\n\n"
+            + line_a.get("rule_block", "")
         )
+
+        # Skills 判定结果
+        skill_block = line_a.get("skill_block", "")
         if skill_block:
             prefix_parts.append(skill_block)
-        prefix_parts.append("## Cloud 清洗输出\n\n" + (llm_clean_summary or "（Cloud 未返回内容）"))
-        material = "\n\n".join(prefix_parts) + "\n\n---\n\n" + material
 
-        structured = bool(incidents)
+        # 历史判别经验（持续学习）
+        learning_ctx = line_b.get("learning_ctx", "")
+        if learning_ctx:
+            prefix_parts.append(learning_ctx)
+
+        material = "\n\n".join(prefix_parts) + "\n\n---\n\n" + line_b["material"]
+
+        # ══════════════════════════════════════════════════════════
+        # 阶段 4：LLM 总结 + 入库
+        # ══════════════════════════════════════════════════════════
+        structured = line_b.get("structured", False)
+        truncated = line_b.get("truncated", False)
         prompt = build_summarize_prompt_serial(
             material,
             [cfg.file_path.name],
@@ -700,6 +747,7 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
             q.put(("progress", 95, f"数据库写入跳过（{db_err}）"))
 
         q.put(("progress", 100, "完成"))
+        incidents = line_b.get("incidents", [])
         meta = (
             f"=== meta ===\n"
             f"generated: {datetime.now().isoformat(timespec='seconds')}\n"
@@ -707,7 +755,7 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
             f"parsed_incidents: {len(incidents)}\n"
             f"structured_mode: {structured}\n"
             f"material_truncated: {truncated}\n"
-            f"rule_hit_lines: {hit_lines}\n"
+            f"rule_hit_lines: {line_a.get('hit_lines', 0)}\n"
             f"bugs_saved_to_db: {db_count}\n\n"
             f"=== LLM summary ===\n\n"
         )
@@ -716,918 +764,998 @@ def _run_analyze(cfg: WorkerConfig, q: queue.Queue) -> None:
         q.put(("err", f"{e}\n\n{traceback.format_exc()}"))
 
 
-def _tk_font_ui() -> tuple[str, int]:
-    return ("Microsoft YaHei UI", 9)
+# ═══════════════════════════════════════════════════════════════
+# PyQt6 UI 层
+# ═══════════════════════════════════════════════════════════════
+
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGridLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMenuBar,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QSplitter,
+    QStatusBar,
+    QTextEdit,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QObject
+from PyQt6.QtGui import QAction, QFont, QFontDatabase
 
 
-def _tk_font_ui_small() -> tuple[str, int]:
-    return ("Microsoft YaHei UI", 8)
+# ── QSS 全局样式 ──────────────────────────────────────────────
+
+QSS = """
+/* ── 全局 ───────────────────────────────────────────── */
+QMainWindow {
+    background-color: #f0f2f5;
+}
+QDialog {
+    background-color: #f0f2f5;
+}
+
+/* ── 卡片 / 分组框 ──────────────────────────────────── */
+QGroupBox {
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    margin-top: 14px;
+    padding: 20px 16px 14px 16px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #374151;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 14px;
+    padding: 0 8px;
+    color: #6b7280;
+}
+
+/* ── 标签 ───────────────────────────────────────────── */
+QLabel#pathLabel {
+    color: #374151;
+    font-size: 13px;
+    padding: 0;
+}
+QLabel#mutedLabel {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+/* ── 按钮通用 ────────────────────────────────────────── */
+QPushButton {
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+    padding: 7px 16px;
+    background-color: #ffffff;
+    color: #374151;
+    font-size: 13px;
+    font-weight: 500;
+}
+QPushButton:hover {
+    background-color: #f9fafb;
+    border-color: #9ca3af;
+}
+QPushButton:pressed {
+    background-color: #f3f4f6;
+}
+
+/* ── 主操作按钮 ─────────────────────────────────────── */
+QPushButton#accentBtn {
+    background-color: #4f46e5;
+    color: #ffffff;
+    border: none;
+    font-weight: 600;
+    font-size: 13px;
+    padding: 8px 20px;
+    border-radius: 7px;
+}
+QPushButton#accentBtn:hover {
+    background-color: #4338ca;
+}
+QPushButton#accentBtn:pressed {
+    background-color: #3730a3;
+}
+QPushButton#accentBtn:disabled {
+    background-color: #a5b4fc;
+    color: #e0e7ff;
+}
+
+/* ── 文本编辑区 ─────────────────────────────────────── */
+QTextEdit {
+    background-color: #fafbfc;
+    color: #1f2937;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 13px;
+    selection-background-color: #c7d2fe;
+    selection-color: #1e1b4b;
+}
+QTextEdit:focus {
+    border-color: #a5b4fc;
+}
+
+/* ── 输入框 ─────────────────────────────────────────── */
+QLineEdit {
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+    padding: 7px 10px;
+    background-color: #ffffff;
+    color: #1f2937;
+    font-size: 13px;
+}
+QLineEdit:focus {
+    border-color: #4f46e5;
+    background-color: #fafafe;
+}
+QLineEdit[echoMode="2"] {
+    font-family: "Consolas", monospace;
+}
+
+/* ── 下拉框 ─────────────────────────────────────────── */
+QComboBox {
+    border: 1px solid #d1d5db;
+    border-radius: 7px;
+    padding: 6px 10px;
+    background-color: #ffffff;
+    color: #1f2937;
+    font-size: 13px;
+    min-width: 80px;
+}
+QComboBox:hover {
+    border-color: #9ca3af;
+}
+QComboBox:focus {
+    border-color: #4f46e5;
+}
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border: none;
+    border-left: 1px solid #e5e7eb;
+}
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 4px;
+    selection-background-color: #eef2ff;
+    selection-color: #1f2937;
+}
+
+/* ── 树形列表 ────────────────────────────────────────── */
+QTreeWidget {
+    background-color: #ffffff;
+    color: #374151;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    alternate-background-color: #fafbfc;
+    selection-background-color: #eef2ff;
+    selection-color: #312e81;
+    outline: none;
+    font-size: 13px;
+}
+QTreeWidget::item {
+    padding: 5px 6px;
+    border-bottom: 1px solid #f3f4f6;
+}
+QTreeWidget::item:hover {
+    background-color: #f5f6ff;
+}
+QHeaderView::section {
+    background-color: #f9fafb;
+    color: #6b7280;
+    border: none;
+    border-bottom: 1px solid #e5e7eb;
+    border-right: 1px solid #f3f4f6;
+    padding: 7px 8px;
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.01em;
+}
+
+/* ── 进度条 ─────────────────────────────────────────── */
+QProgressBar {
+    border: none;
+    border-radius: 4px;
+    background-color: #e5e7eb;
+    height: 6px;
+    text-align: center;
+    font-size: 0px;
+}
+QProgressBar::chunk {
+    background-color: #4f46e5;
+    border-radius: 4px;
+}
+
+/* ── 菜单栏 ─────────────────────────────────────────── */
+QMenuBar {
+    background-color: #ffffff;
+    border-bottom: 1px solid #f3f4f6;
+    padding: 3px 6px;
+    font-size: 13px;
+}
+QMenuBar::item {
+    padding: 6px 12px;
+    border-radius: 6px;
+    color: #4b5563;
+}
+QMenuBar::item:selected {
+    background-color: #f3f4f6;
+    color: #1f2937;
+}
+QMenu {
+    background-color: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 6px;
+}
+QMenu::item {
+    padding: 7px 32px 7px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    color: #374151;
+}
+QMenu::item:selected {
+    background-color: #f3f4f6;
+    color: #1f2937;
+}
+QMenu::separator {
+    height: 1px;
+    background: #f3f4f6;
+    margin: 4px 8px;
+}
+
+/* ── 状态栏 ─────────────────────────────────────────── */
+QStatusBar {
+    background-color: #f0f2f5;
+    color: #9ca3af;
+    font-size: 12px;
+    border-top: 1px solid #e5e7eb;
+    padding: 2px 10px;
+}
+
+/* ── 分割器 ─────────────────────────────────────────── */
+QSplitter::handle {
+    background-color: transparent;
+}
+QSplitter::handle:vertical {
+    height: 1px;
+}
+
+/* ── 滚动条 ─────────────────────────────────────────── */
+QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: #d1d5db;
+    border-radius: 4px;
+    min-height: 30px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #9ca3af;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 8px;
+}
+QScrollBar::handle:horizontal {
+    background: #d1d5db;
+    border-radius: 4px;
+    min-width: 30px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: #9ca3af;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+
+/* ── 提示文本 ──────────────────────────────────────── */
+QTextEdit[placeholderText], QLineEdit[placeholderText] {
+    color: #d1d5db;
+}
+"""
 
 
-def _tk_font_mono() -> tuple[str, int]:
-    """等宽 + 中文回退。"""
-    return ("Microsoft YaHei UI", 9)
+# ── 信号适配器：让 _run_analyze 的 queue.put() 转为 Qt 信号 ──
+
+class _QueueSignalAdapter(QObject):
+    progress = pyqtSignal(int, str)
+    result = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def put(self, item: tuple) -> None:
+        kind, *rest = item
+        if kind == "progress":
+            pct, msg = rest
+            self.progress.emit(pct, msg)
+        elif kind == "ok":
+            self.result.emit(rest[0])
+        elif kind == "err":
+            self.error.emit(rest[0])
 
 
-def _tk_font_result() -> tuple[str, int]:
-    """结果区略小字号，小窗口内多显示几行。"""
-    return ("Microsoft YaHei UI", 8)
+# ── 工作线程 ──────────────────────────────────────────────────
+
+class AnalysisWorker(QThread):
+    def __init__(self, cfg: WorkerConfig, parent: QObject | None = None):
+        super().__init__(parent)
+        self.cfg = cfg
+        self._adapter = _QueueSignalAdapter()
+
+    @property
+    def progress_signal(self):
+        return self._adapter.progress
+
+    @property
+    def result_signal(self):
+        return self._adapter.result
+
+    @property
+    def error_signal(self):
+        return self._adapter.error
+
+    def run(self) -> None:
+        _run_analyze(self.cfg, self._adapter)
 
 
-def _pick_mono_family(root: tk.Tk) -> str:
-    try:
-        fams = set(str(x) for x in root.tk.call("font", "families"))
-    except tk.TclError:
-        return "Microsoft YaHei UI"
-    for name in ("Cascadia Mono", "Consolas", "Lucida Console"):
-        if name in fams:
-            return name
-    return "Microsoft YaHei UI"
+class ImportWorker(QThread):
+    finished = pyqtSignal(list, str)
+
+    def __init__(self, src_path: Path, parent: QObject | None = None):
+        super().__init__(parent)
+        self._src_path = src_path
+
+    def run(self) -> None:
+        plain = _tabular_rules_source_to_plain(self._src_path)
+        llm_text = _deepseek_submit(_rule_import_prompt(plain))
+        new_items = _rules_from_llm_response(llm_text)
+        if not new_items:
+            raise ValueError("模型未返回任何可用规则。")
+        self.finished.emit(new_items, self._src_path.name)
 
 
-def _apply_tk_styles(root: tk.Tk) -> ttk.Style:
-    style = ttk.Style()
-    try:
-        style.theme_use("clam")
-    except tk.TclError:
-        pass
-    mono_fam = _pick_mono_family(root)
-    bg = "#e4e9f2"
-    card = "#ffffff"
-    fg = "#1e293b"
-    muted = "#64748b"
-    accent = "#3b82f6"
-    accent_dark = "#2563eb"
-    border = "#c7d2e0"
-    toolbar = "#dce3ee"
-    root.configure(background=bg)
-    ui = _tk_font_ui()
-    ui_sm = _tk_font_ui_small()
-    style.configure(".", background=bg, foreground=fg, font=ui)
-    style.configure("TFrame", background=bg)
-    style.configure("Card.TFrame", background=card, relief="flat")
-    style.configure("Shell.TFrame", background=bg)
-    style.configure("ToolStrip.TFrame", background=toolbar, relief="flat")
-    style.configure("TLabelframe", background=bg, foreground=fg, borderwidth=1, relief="solid")
-    style.configure("TLabelframe.Label", background=bg, foreground=accent, font=(ui[0], ui[1], "bold"))
-    style.configure("Subtle.TLabel", background=toolbar, foreground=muted, font=ui_sm)
-    style.configure("SubtleOnBg.TLabel", background=bg, foreground=muted, font=ui_sm)
-    style.configure("PathCard.TLabelframe", background=card)
-    style.configure("PathCard.TLabelframe.Label", background=card, foreground=muted, font=(ui[0], 8, "bold"))
-    style.configure("Path.TLabel", background=card, foreground=fg, font=ui_sm)
-    style.configure("TCheckbutton", background=bg, foreground=fg)
-    style.configure("TButton", font=ui, padding=(6, 4))
-    style.configure("Secondary.TButton", font=ui, padding=(6, 4))
-    style.map("Secondary.TButton", background=[("active", "#cbd5e1")])
-    style.configure("Secondary.TButton", background="#f1f5f9", foreground=fg, borderwidth=1)
-    style.configure("Accent.TButton", font=(ui[0], ui[1], "bold"), padding=(8, 5))
-    style.map(
-        "Accent.TButton",
-        background=[("active", accent_dark), ("pressed", "#1d4ed8")],
-        foreground=[("disabled", "#94a3b8")],
-    )
-    style.configure("Accent.TButton", background=accent, foreground="white", borderwidth=0)
-    style.configure(
-        "Treeview",
-        font=(mono_fam, 9),
-        rowheight=20,
-        fieldbackground=card,
-        background=card,
-        foreground=fg,
-        bordercolor=border,
-    )
-    style.configure("Treeview.Heading", font=(ui[0], 8, "bold"), background="#eef2f7", foreground="#475569")
-    style.map("Treeview", background=[("selected", "#dbeafe")], foreground=[("selected", fg)])
-    style.configure("TProgressbar", thickness=6, troughcolor="#cbd5e1", background=accent, borderwidth=0)
-    style.configure("TSeparator", background=border)
-    return style
+# ── 对话框：DeepSeek API 配置 ─────────────────────────────────
 
+class DeepSeekConfigDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("DeepSeek API 配置")
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(200)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
 
-class MainApp:
-    def __init__(self) -> None:
-        self.root = tk.Tk()
-        self.root.title("串口日志分析")
-        _apply_tk_styles(self.root)
-        sw, sh = self.root.winfo_screenwidth(), self.root.winfo_screenheight()
-        max_w = min(720, sw - 32)
-        max_h = sh - 32
-        self.root.maxsize(max_w, max_h)
-        ww = min(640, max(480, sw - 56), max_w)
-        wh = min(500, max(360, sh - 80), max_h)
-        self.root.geometry(f"{ww}x{wh}")
-        self.root.minsize(min(400, ww), min(300, min(wh, max_h)))
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(14)
 
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
-        file_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="文件", menu=file_menu)
-        file_menu.add_command(label="打开…", command=self._pick_file)
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="设置", menu=settings_menu)
-        settings_menu.add_command(label="DeepSeek API…", command=self._open_deepseek_config)
-        settings_menu.add_command(label="清洗与分析材料…", command=self._open_clean_config)
-        rules_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="规则", menu=rules_menu)
-        rules_menu.add_command(label="串口匹配规则…", command=self._open_rules_config)
-        rules_menu.add_command(label="从 Excel/CSV 导入规则…", command=self._import_rules_from_xlsx)
-        db_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="数据库", menu=db_menu)
-        db_menu.add_command(label="Bug 记录…", command=self._open_bug_records)
-        db_menu.add_command(label="测试连接…", command=self._test_db_connection)
-        skills_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="Skills", menu=skills_menu)
-        skills_menu.add_command(label="管理 Skills…", command=self._open_skills_manager)
-        menubar.add_command(label="免责声明", command=self._show_disclaimer)
-        menubar.add_command(label="关于", command=self._show_about)
+        form = QFormLayout()
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        self._current_file: Path | None = None
-        self._last_result = ""
-        self._msg_q: queue.Queue = queue.Queue()
-        self._worker_thread: threading.Thread | None = None
-        self._import_thread: threading.Thread | None = None
-        self._analysis_notes: str = ""
-        self._bug_win: tk.Toplevel | None = None
-        self._bug_tree: ttk.Treeview | None = None
-        self._skills_win: tk.Toplevel | None = None
-        self._skills_tree: ttk.Treeview | None = None
-        self._clean_prompt_body: str = _default_cleaning_prompt()
-        self._clean_win: tk.Toplevel | None = None
-        self._rules_win: tk.Toplevel | None = None
-        self._tree: ttk.Treeview | None = None
+        self._api_key_edit = QLineEdit()
+        self._api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._api_key_edit.setPlaceholderText("sk-...")
+        self._api_key_edit.setText(os.environ.get("DEEPSEEK_API_KEY", ""))
+        self._api_key_edit.setMinimumHeight(34)
 
-        shell = ttk.Frame(self.root, padding=(6, 5), style="Shell.TFrame")
-        shell.pack(fill=tk.BOTH, expand=True)
+        self._model_edit = QLineEdit()
+        self._model_edit.setPlaceholderText("deepseek-chat")
+        self._model_edit.setText(os.environ.get("DEEPSEEK_MODEL", "deepseek-chat"))
+        self._model_edit.setMinimumHeight(34)
 
-        path_lf = ttk.LabelFrame(shell, text="当前文件", padding=(5, 4), style="PathCard.TLabelframe")
-        path_lf.pack(fill=tk.X, pady=(0, 5))
-        self._path_var = tk.StringVar(
-            value="未选择文件（文件 → 打开…；规则见「规则」菜单，清洗见「设置」）"
+        form.addRow("API Key ：", self._api_key_edit)
+        form.addRow("模型：", self._model_edit)
+        layout.addLayout(form)
+
+        hint = QLabel("保存后写入项目 .env 文件；已运行的任务需下次「开始分析」生效。")
+        hint.setWordWrap(True)
+        hint.setObjectName("mutedLabel")
+        layout.addWidget(hint)
+
+        layout.addStretch()
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
         )
-        wrap = min(ww - 20, max(260, sw - 100))
-        ttk.Label(path_lf, textvariable=self._path_var, wraplength=wrap, style="Path.TLabel").pack(
-            anchor=tk.W, fill=tk.X
+        b = buttons.button(QDialogButtonBox.StandardButton.Save)
+        if b:
+            b.setObjectName("accentBtn")
+            b.setMinimumHeight(34)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _save(self) -> None:
+        apply_deepseek_env_to_dotenv({
+            "DEEPSEEK_API_KEY": self._api_key_edit.text().strip(),
+            "DEEPSEEK_MODEL": self._model_edit.text().strip() or "deepseek-chat",
+        })
+        QMessageBox.information(self, "配置", "已保存到 .env。")
+        self.accept()
+
+
+# ── 对话框：清洗与分析材料 ─────────────────────────────────────
+
+class CleanSettingsDialog(QDialog):
+    def __init__(
+        self,
+        analysis_notes: str,
+        clean_prompt: str,
+        parent: QWidget | None = None,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("清洗与分析材料")
+        self.setMinimumSize(540, 540)
+        self.resize(640, 580)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(12)
+
+        # 分析侧重点
+        notes_label = QLabel("分析侧重点（可选）")
+        notes_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #374151;")
+        layout.addWidget(notes_label)
+
+        self._notes_edit = QTextEdit()
+        self._notes_edit.setAcceptRichText(False)
+        self._notes_edit.setPlaceholderText("输入分析侧重点，将作为上下文注入 LLM 提示…")
+        self._notes_edit.setPlainText(analysis_notes)
+        self._notes_edit.setMaximumHeight(90)
+        layout.addWidget(self._notes_edit)
+
+        # Cloud 清洗 prompt
+        clean_label = QLabel("Cloud 清洗 prompt 前缀")
+        clean_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #374151;")
+        layout.addWidget(clean_label)
+
+        self._clean_edit = QTextEdit()
+        self._clean_edit.setAcceptRichText(False)
+        mono_font = QFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        mono_font.setPointSize(10)
+        self._clean_edit.setFont(mono_font)
+        self._clean_edit.setPlainText(clean_prompt)
+        layout.addWidget(self._clean_edit, stretch=1)
+
+        # 体量设置
+        env_group = QGroupBox("材料与节选体量（写入项目 .env）")
+        env_form = QFormLayout(env_group)
+        env_form.setSpacing(8)
+        env_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        self._summary_chars = QLineEdit()
+        self._summary_chars.setText(os.environ.get("SUMMARY_MAX_CHARS", "90000"))
+        self._summary_chars.setMaximumWidth(120)
+        self._summary_chars.setMinimumHeight(32)
+
+        self._clean_chars = QLineEdit()
+        self._clean_chars.setText(os.environ.get("CLEAN_MAX_CHARS", "24000"))
+        self._clean_chars.setMaximumWidth(120)
+        self._clean_chars.setMinimumHeight(32)
+
+        env_form.addRow("SUMMARY_MAX_CHARS：", self._summary_chars)
+        env_form.addRow("CLEAN_MAX_CHARS：", self._clean_chars)
+        hint = QLabel("留空则删除 .env 中该键，下次使用内置默认。")
+        hint.setObjectName("mutedLabel")
+        env_form.addRow("", hint)
+
+        layout.addWidget(env_group)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Close
         )
+        b = buttons.button(QDialogButtonBox.StandardButton.Save)
+        if b:
+            b.setObjectName("accentBtn")
+            b.setMinimumHeight(34)
+        c = buttons.button(QDialogButtonBox.StandardButton.Close)
+        if c:
+            c.setMinimumHeight(34)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
 
-        out_lf = ttk.LabelFrame(shell, text="分析结果", padding=(5, 5))
-        out_lf.pack(fill=tk.BOTH, expand=True)
-        out_lf.columnconfigure(0, weight=1)
-        out_lf.rowconfigure(0, weight=1)
+        self._analysis_notes = analysis_notes
+        self._clean_prompt_body = clean_prompt
 
-        self._result = scrolledtext.ScrolledText(
-            out_lf,
-            height=1,
-            wrap=tk.WORD,
-            state=tk.DISABLED,
-            font=_tk_font_result(),
-            relief=tk.FLAT,
-            borderwidth=1,
-            highlightthickness=1,
-            highlightbackground="#c7d2e0",
-            highlightcolor="#3b82f6",
-            padx=5,
-            pady=5,
-            bg="#fafbfc",
-            fg="#0f172a",
-            insertbackground="#0f172a",
-            selectbackground="#bfdbfe",
-        )
-        self._result.grid(row=0, column=0, sticky=tk.NSEW, pady=(0, 5))
+    def _save(self) -> None:
+        s_raw = self._summary_chars.text().strip()
+        c_raw = self._clean_chars.text().strip()
 
-        bot = ttk.Frame(out_lf)
-        bot.grid(row=1, column=0, sticky=tk.EW)
-        bot.columnconfigure(0, weight=1)
-
-        row_btn = ttk.Frame(bot, style="ToolStrip.TFrame", padding=(0, 4, 0, 2))
-        row_btn.grid(row=0, column=0, sticky=tk.EW)
-        row_btn.columnconfigure(0, weight=1)
-        btn_wrap = ttk.Frame(row_btn, style="ToolStrip.TFrame")
-        btn_wrap.grid(row=0, column=0, sticky=tk.W)
-        ttk.Button(btn_wrap, text="开始分析", command=self._run, style="Accent.TButton").pack(
-            side=tk.LEFT, padx=(0, 6)
-        )
-        ttk.Button(btn_wrap, text="保存 TXT…", command=self._save_result, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=(0, 4)
-        )
-
-        ttk.Separator(bot, orient=tk.HORIZONTAL).grid(row=1, column=0, sticky=tk.EW, pady=(2, 4))
-
-        row_prog = ttk.Frame(bot, style="ToolStrip.TFrame", padding=(0, 0, 0, 4))
-        row_prog.grid(row=2, column=0, sticky=tk.EW)
-        row_prog.columnconfigure(0, weight=1)
-        self._progress = ttk.Progressbar(row_prog, maximum=100, mode="determinate")
-        self._progress.grid(row=0, column=0, sticky=tk.EW)
-
-        self._status = tk.StringVar(value="就绪")
-        row_stat = ttk.Frame(bot)
-        row_stat.grid(row=3, column=0, sticky=tk.EW, pady=(0, 2))
-        ttk.Label(row_stat, textvariable=self._status, style="SubtleOnBg.TLabel").pack(anchor=tk.W)
-
-    def _set_result_text(self, s: str) -> None:
-        self._result.configure(state=tk.NORMAL)
-        self._result.delete("1.0", tk.END)
-        self._result.insert(tk.END, s)
-        self._result.configure(state=tk.DISABLED)
-
-    def _show_disclaimer(self) -> None:
-        messagebox.showinfo("免责声明", DISCLAIMER_TEXT, parent=self.root)
-
-    def _show_about(self) -> None:
-        messagebox.showinfo(
-            "关于",
-            f"作者：{APP_AUTHOR}\n版本：{APP_VERSION}",
-            parent=self.root,
-        )
-
-    def _open_deepseek_config(self) -> None:
-        dlg = tk.Toplevel(self.root)
-        dlg.title("DeepSeek API")
-        dlg.transient(self.root)
-        dlg.grab_set()
-
-        keys = (
-            ("DEEPSEEK_API_KEY", "API Key（deepseek.com/api_keys）", True),
-            ("DEEPSEEK_MODEL", "模型（默认 deepseek-chat）", False),
-        )
-        vars_: dict[str, tk.StringVar] = {}
-        frm = ttk.Frame(dlg, padding=10)
-        frm.pack(fill=tk.BOTH, expand=True)
-        for i, (key, label, secret) in enumerate(keys):
-            ttk.Label(frm, text=label).grid(row=i, column=0, sticky=tk.NW, pady=4)
-            v = tk.StringVar(value=os.environ.get(key, ""))
-            vars_[key] = v
-            if secret:
-                ent = tk.Entry(frm, textvariable=v, width=56, show="*")
-            else:
-                ent = ttk.Entry(frm, textvariable=v, width=56)
-            ent.grid(row=i, column=1, sticky=tk.EW, pady=4)
-        frm.columnconfigure(1, weight=1)
-
-        hint = ttk.Label(
-            frm,
-            text="保存后写入项目目录下的 .env；当前已运行的分析任务需下次「开始分析」后生效。",
-            wraplength=520,
-        )
-        hint.grid(row=len(keys), column=0, columnspan=2, sticky=tk.W, pady=(8, 0))
-
-        def save() -> None:
-            apply_deepseek_env_to_dotenv({k: vars_[k].get() for k in vars_})
-            messagebox.showinfo("配置", "已保存到 .env。", parent=dlg)
-            dlg.destroy()
-
-        bf = ttk.Frame(frm)
-        bf.grid(row=len(keys) + 1, column=0, columnspan=2, pady=12)
-        ttk.Button(bf, text="保存", command=save).pack(side=tk.LEFT, padx=4)
-        ttk.Button(bf, text="取消", command=dlg.destroy).pack(side=tk.LEFT, padx=4)
-
-    def _build_clean_settings_window(self) -> None:
-        win = tk.Toplevel(self.root)
-        win.title("清洗与分析材料")
-        win.transient(self.root)
-        win.minsize(480, 400)
-        win.geometry("600x480")
-        body = ttk.Frame(win, padding=10)
-        body.pack(fill=tk.BOTH, expand=True)
-        body.columnconfigure(0, weight=1)
-        body.rowconfigure(1, weight=1)
-        body.rowconfigure(3, weight=2)
-
-        ttk.Label(body, text="分析侧重点（可选）", font=(_tk_font_ui()[0], _tk_font_ui()[1], "bold")).grid(
-            row=0, column=0, sticky=tk.W
-        )
-        self._dlg_notes = scrolledtext.ScrolledText(
-            body,
-            height=4,
-            wrap=tk.WORD,
-            font=_tk_font_ui(),
-            relief=tk.FLAT,
-            borderwidth=1,
-            highlightthickness=1,
-            highlightbackground="#cbd5e1",
-            highlightcolor="#2563eb",
-            padx=6,
-            pady=4,
-            bg="#f8fafc",
-            fg="#1e293b",
-            insertbackground="#1e293b",
-        )
-        self._dlg_notes.grid(row=1, column=0, sticky=tk.NSEW, pady=(4, 8))
-
-        ttk.Label(body, text="Cloud 清洗 prompt 前缀", font=(_tk_font_ui()[0], _tk_font_ui()[1], "bold")).grid(
-            row=2, column=0, sticky=tk.W
-        )
-        self._dlg_clean_prompt = scrolledtext.ScrolledText(
-            body,
-            height=8,
-            wrap=tk.WORD,
-            font=_tk_font_mono(),
-            relief=tk.FLAT,
-            borderwidth=1,
-            highlightthickness=1,
-            highlightbackground="#cbd5e1",
-            highlightcolor="#2563eb",
-            padx=6,
-            pady=4,
-            bg="#f8fafc",
-            fg="#1e293b",
-            insertbackground="#1e293b",
-        )
-        self._dlg_clean_prompt.grid(row=3, column=0, sticky=tk.NSEW, pady=(4, 8))
-
-        env_fr = ttk.LabelFrame(body, text="材料与节选体量（写入项目 .env）", padding=(6, 6))
-        env_fr.grid(row=4, column=0, sticky=tk.EW, pady=(0, 8))
-        env_fr.columnconfigure(1, weight=1)
-        self._env_summary_chars = tk.StringVar(value=os.environ.get("SUMMARY_MAX_CHARS", "90000"))
-        self._env_clean_chars = tk.StringVar(value=os.environ.get("CLEAN_MAX_CHARS", "24000"))
-        ttk.Label(env_fr, text="SUMMARY_MAX_CHARS").grid(row=0, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(env_fr, textvariable=self._env_summary_chars, width=16).grid(
-            row=0, column=1, sticky=tk.W, pady=2, padx=(8, 0)
-        )
-        ttk.Label(env_fr, text="CLEAN_MAX_CHARS").grid(row=1, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(env_fr, textvariable=self._env_clean_chars, width=16).grid(
-            row=1, column=1, sticky=tk.W, pady=2, padx=(8, 0)
-        )
-        ttk.Label(
-            env_fr,
-            text="留空则删除 .env 中该键，下次运行使用内置默认。",
-            style="SubtleOnBg.TLabel",
-            wraplength=520,
-        ).grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(6, 0))
-
-        def save_clean() -> None:
-            s_raw = self._env_summary_chars.get().strip()
-            c_raw = self._env_clean_chars.get().strip()
-            if s_raw:
-                try:
-                    v = int(s_raw)
-                    if v < 4000 or v > 240_000:
-                        messagebox.showwarning(
-                            "校验",
-                            "SUMMARY_MAX_CHARS 建议在 4000～240000。",
-                            parent=win,
-                        )
-                        return
-                except ValueError:
-                    messagebox.showwarning("校验", "SUMMARY_MAX_CHARS 须为整数或留空。", parent=win)
-                    return
-            if c_raw:
-                try:
-                    cv = int(c_raw)
-                    if cv < 1000 or cv > 80_000:
-                        messagebox.showwarning(
-                            "校验",
-                            "CLEAN_MAX_CHARS 建议在 1000～80000。",
-                            parent=win,
-                        )
-                        return
-                except ValueError:
-                    messagebox.showwarning("校验", "CLEAN_MAX_CHARS 须为整数或留空。", parent=win)
-                    return
-            self._analysis_notes = self._dlg_notes.get("1.0", tk.END).rstrip("\n")
-            self._clean_prompt_body = self._dlg_clean_prompt.get("1.0", tk.END).rstrip("\n")
-            apply_deepseek_env_to_dotenv(
-                {
-                    "SUMMARY_MAX_CHARS": s_raw,
-                    "CLEAN_MAX_CHARS": c_raw,
-                }
-            )
-            messagebox.showinfo("清洗与分析材料", "已保存文本与 .env 项。", parent=win)
-
-        def close_clean() -> None:
-            win.withdraw()
-
-        bf = ttk.Frame(body)
-        bf.grid(row=5, column=0, sticky=tk.W, pady=(4, 0))
-        ttk.Button(bf, text="保存", command=save_clean).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Button(bf, text="关闭", command=close_clean).pack(side=tk.LEFT, padx=6)
-
-        win.protocol("WM_DELETE_WINDOW", close_clean)
-        self._clean_win = win
-        win.withdraw()
-
-    def _open_clean_config(self) -> None:
-        if self._clean_win is None or not self._clean_win.winfo_exists():
-            self._build_clean_settings_window()
-        assert self._clean_win is not None
-        w = self._clean_win
-        self._dlg_notes.delete("1.0", tk.END)
-        self._dlg_notes.insert(tk.END, self._analysis_notes)
-        self._dlg_clean_prompt.delete("1.0", tk.END)
-        self._dlg_clean_prompt.insert(tk.END, self._clean_prompt_body)
-        self._env_summary_chars.set(os.environ.get("SUMMARY_MAX_CHARS", "90000"))
-        self._env_clean_chars.set(os.environ.get("CLEAN_MAX_CHARS", "24000"))
-        w.deiconify()
-        w.lift()
-
-    def _build_rules_window(self) -> None:
-        win = tk.Toplevel(self.root)
-        win.title("串口匹配规则")
-        win.transient(self.root)
-        win.minsize(560, 320)
-        win.geometry("700x380")
-        outer = ttk.Frame(win, padding=8)
-        outer.pack(fill=tk.BOTH, expand=True)
-
-        rh = ttk.Frame(outer)
-        rh.pack(fill=tk.X, pady=(0, 6))
-        ttk.Button(rh, text="添加自定义规则", command=self._add_rule, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=(0, 6)
-        )
-        ttk.Button(rh, text="删除选中自定义规则", command=self._del_rule, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=6
-        )
-        ttk.Button(rh, text="刷新列表", command=self._refresh_rules_table, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=6
-        )
-
-        rules_lab = ttk.LabelFrame(outer, text="规则（内置 + serial_rules_user.json）", padding=(6, 4))
-        rules_lab.pack(fill=tk.BOTH, expand=True)
-
-        cols = ("src", "pri", "cat", "lbl", "pat")
-        self._tree = ttk.Treeview(
-            rules_lab, columns=cols, show="headings", height=12, selectmode="browse"
-        )
-        self._tree.heading("src", text="来源")
-        self._tree.heading("pri", text="优先级")
-        self._tree.heading("cat", text="category")
-        self._tree.heading("lbl", text="显示名")
-        self._tree.heading("pat", text="pattern")
-        self._tree.column("src", width=56, stretch=False)
-        self._tree.column("pri", width=52, stretch=False)
-        self._tree.column("cat", width=100)
-        self._tree.column("lbl", width=140)
-        self._tree.column("pat", width=400)
-        sy = ttk.Scrollbar(rules_lab, orient=tk.VERTICAL, command=self._tree.yview)
-        self._tree.configure(yscrollcommand=sy.set)
-        self._tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        sy.pack(side=tk.RIGHT, fill=tk.Y)
-
-        def close_rules() -> None:
-            win.withdraw()
-
-        win.protocol("WM_DELETE_WINDOW", close_rules)
-        bf = ttk.Frame(outer)
-        bf.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(bf, text="确定", command=close_rules).pack(side=tk.RIGHT)
-
-        self._rules_win = win
-        win.withdraw()
-
-    def _open_rules_config(self) -> None:
-        if self._rules_win is None or not self._rules_win.winfo_exists():
-            self._build_rules_window()
-        self._refresh_rules_table()
-        assert self._rules_win is not None
-        self._rules_win.deiconify()
-        self._rules_win.lift()
-
-    def _pick_file(self) -> None:
-        path = filedialog.askopenfilename(
-            parent=self.root,
-            title="选择串口日志",
-            initialdir=str(_ROOT),
-            filetypes=[
-                ("日志", "*.log"),
-                ("文本", "*.txt"),
-                ("所有文件", "*.*"),
-            ],
-        )
-        if path:
-            self._current_file = Path(path)
-            self._path_var.set(str(self._current_file))
-
-    def _refresh_rules_table(self) -> None:
-        if self._tree is None:
-            return
-        for iid in self._tree.get_children():
-            self._tree.delete(iid)
-        r = 0
-        for pri, cat, lbl, pat in RAW_ALERT_RULE_DEFINITIONS:
-            self._tree.insert("", tk.END, iid=f"b{r}", values=("内置", str(pri), cat, lbl, pat))
-            r += 1
-        user_items = load_user_rules_raw(_USER_RULES_PATH)
-        for i, it in enumerate(user_items):
-            self._tree.insert(
-                "",
-                tk.END,
-                iid=f"u{i}",
-                values=(
-                    "自定义",
-                    str(it["priority"]),
-                    it["category"],
-                    it["label"],
-                    it["pattern"],
-                ),
-            )
-
-    def _add_rule(self) -> None:
-        parent_win = self._rules_win if self._rules_win and self._rules_win.winfo_exists() else self.root
-        dlg = tk.Toplevel(parent_win)
-        dlg.title("添加自定义规则")
-        dlg.transient(parent_win)
-        dlg.grab_set()
-
-        pri_v = tk.StringVar(value="5")
-        cat_v = tk.StringVar()
-        lbl_v = tk.StringVar()
-        pat_v = tk.StringVar()
-
-        frm = ttk.Frame(dlg, padding=10)
-        frm.pack(fill=tk.BOTH, expand=True)
-        ttk.Label(frm, text="优先级（数字越小越优先）").grid(row=0, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(frm, textvariable=pri_v, width=8).grid(row=0, column=1, sticky=tk.W)
-        ttk.Label(frm, text="category（唯一键）").grid(row=1, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(frm, textvariable=cat_v, width=32).grid(row=1, column=1, sticky=tk.W)
-        ttk.Label(frm, text="显示名").grid(row=2, column=0, sticky=tk.W, pady=2)
-        ttk.Entry(frm, textvariable=lbl_v, width=32).grid(row=2, column=1, sticky=tk.W)
-        ttk.Label(frm, text="pattern（正则）").grid(row=3, column=0, sticky=tk.NW, pady=2)
-        ttk.Entry(frm, textvariable=pat_v, width=48).grid(row=3, column=1, sticky=tk.W)
-
-        def ok() -> None:
+        if s_raw:
             try:
-                p = int(pri_v.get().strip() or "5")
+                v = int(s_raw)
+                if v < 4000 or v > 240_000:
+                    QMessageBox.warning(self, "校验", "SUMMARY_MAX_CHARS 建议在 4000～240000。")
+                    return
             except ValueError:
-                messagebox.showwarning("校验", "优先级必须是整数。", parent=dlg)
+                QMessageBox.warning(self, "校验", "SUMMARY_MAX_CHARS 须为整数或留空。")
                 return
-            cat = cat_v.get().strip()
-            pat = pat_v.get().strip()
-            lbl = lbl_v.get().strip() or cat
-            if not cat or not pat:
-                messagebox.showwarning("校验", "请填写 category 与 pattern。", parent=dlg)
-                return
+        if c_raw:
             try:
-                re.compile(pat, re.I)
-            except re.error as e:
-                messagebox.showwarning("校验", f"正则无效：{e}", parent=dlg)
+                cv = int(c_raw)
+                if cv < 1000 or cv > 80_000:
+                    QMessageBox.warning(self, "校验", "CLEAN_MAX_CHARS 建议在 1000～80000。")
+                    return
+            except ValueError:
+                QMessageBox.warning(self, "校验", "CLEAN_MAX_CHARS 须为整数或留空。")
                 return
-            items = load_user_rules_raw(_USER_RULES_PATH)
-            items.append(
-                {"priority": p, "category": cat, "label": lbl, "pattern": pat}
-            )
-            save_user_rules_raw(_USER_RULES_PATH, items)
-            dlg.destroy()
-            self._refresh_rules_table()
 
-        bf = ttk.Frame(frm)
-        bf.grid(row=4, column=0, columnspan=2, pady=10)
-        ttk.Button(bf, text="确定", command=ok).pack(side=tk.LEFT, padx=4)
-        ttk.Button(bf, text="取消", command=dlg.destroy).pack(side=tk.LEFT, padx=4)
+        self._analysis_notes = self._notes_edit.toPlainText().rstrip("\n")
+        self._clean_prompt_body = self._clean_edit.toPlainText().rstrip("\n")
+        apply_deepseek_env_to_dotenv({
+            "SUMMARY_MAX_CHARS": s_raw,
+            "CLEAN_MAX_CHARS": c_raw,
+        })
+        QMessageBox.information(self, "清洗与分析材料", "已保存文本与 .env 项。")
 
-    def _del_rule(self) -> None:
-        if self._tree is None:
+    def get_notes(self) -> str:
+        return self._analysis_notes
+
+    def get_clean_prompt(self) -> str:
+        return self._clean_prompt_body
+
+    def refresh_fields(self, analysis_notes: str, clean_prompt: str) -> None:
+        self._notes_edit.setPlainText(analysis_notes)
+        self._clean_edit.setPlainText(clean_prompt)
+        self._summary_chars.setText(os.environ.get("SUMMARY_MAX_CHARS", "90000"))
+        self._clean_chars.setText(os.environ.get("CLEAN_MAX_CHARS", "24000"))
+
+
+# ── 对话框：添加自定义规则 ─────────────────────────────────────
+
+class AddRuleDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("添加自定义规则")
+        self.setMinimumWidth(460)
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(12)
+
+        form = QFormLayout()
+        form.setSpacing(10)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        self._pri_edit = QLineEdit("5")
+        self._pri_edit.setMaximumWidth(80)
+        self._pri_edit.setMinimumHeight(32)
+
+        self._cat_edit = QLineEdit()
+        self._cat_edit.setMinimumHeight(32)
+        self._lbl_edit = QLineEdit()
+        self._lbl_edit.setMinimumHeight(32)
+        self._pat_edit = QLineEdit()
+        self._pat_edit.setMinimumHeight(32)
+
+        form.addRow("优先级：", self._pri_edit)
+        form.addRow("category：", self._cat_edit)
+        form.addRow("显示名：", self._lbl_edit)
+        form.addRow("pattern：", self._pat_edit)
+
+        hint = QLabel("优先级数字越小越优先；category 为唯一键，不可与已有规则重复。")
+        hint.setWordWrap(True)
+        hint.setObjectName("mutedLabel")
+        form.addRow("", hint)
+
+        layout.addLayout(form)
+        layout.addStretch()
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        b = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        if b:
+            b.setObjectName("accentBtn")
+            b.setMinimumHeight(34)
+        buttons.accepted.connect(self._validate_and_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _validate_and_accept(self) -> None:
+        try:
+            p = int(self._pri_edit.text().strip() or "5")
+        except ValueError:
+            QMessageBox.warning(self, "校验", "优先级必须是整数。")
             return
-        parent_win = self._rules_win if self._rules_win and self._rules_win.winfo_exists() else self.root
-        sel = self._tree.selection()
-        if not sel:
-            return
-        iid = sel[0]
-        if not iid.startswith("u"):
-            messagebox.showinfo("提示", "只能删除「自定义」规则。", parent=parent_win)
+        cat = self._cat_edit.text().strip()
+        pat = self._pat_edit.text().strip()
+        lbl = self._lbl_edit.text().strip() or cat
+        if not cat or not pat:
+            QMessageBox.warning(self, "校验", "请填写 category 与 pattern。")
             return
         try:
-            user_idx = int(iid[1:])
-        except ValueError:
+            re.compile(pat, re.I)
+        except re.error as e:
+            QMessageBox.warning(self, "校验", f"正则无效：{e}")
             return
         items = load_user_rules_raw(_USER_RULES_PATH)
-        if 0 <= user_idx < len(items):
-            items.pop(user_idx)
+        items.append({"priority": p, "category": cat, "label": lbl, "pattern": pat})
+        save_user_rules_raw(_USER_RULES_PATH, items)
+        self.accept()
+
+
+# ── 对话框：串口匹配规则管理 ──────────────────────────────────
+
+class RulesDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("串口匹配规则")
+        self.setMinimumSize(680, 420)
+        self.resize(780, 480)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(12)
+
+        # 工具栏
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
+
+        add_btn = QPushButton("+ 添加规则")
+        add_btn.setMinimumHeight(32)
+        add_btn.clicked.connect(self._add_rule)
+        del_btn = QPushButton("删除选中")
+        del_btn.setMinimumHeight(32)
+        del_btn.clicked.connect(self._del_rule)
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.setMinimumHeight(32)
+        refresh_btn.clicked.connect(self.refresh_table)
+
+        toolbar.addWidget(add_btn)
+        toolbar.addWidget(del_btn)
+        toolbar.addWidget(refresh_btn)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+
+        # 规则表格
+        self._tree = QTreeWidget()
+        self._tree.setColumnCount(5)
+        self._tree.setHeaderLabels(["来源", "优先级", "category", "显示名", "pattern"])
+        self._tree.setAlternatingRowColors(True)
+        self._tree.setRootIsDecorated(False)
+        self._tree.setSelectionBehavior(QTreeWidget.SelectionBehavior.SelectRows)
+        self._tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+
+        header = self._tree.header()
+        header.setStretchLastSection(True)
+        header.resizeSection(0, 60)
+        header.resizeSection(1, 56)
+        header.resizeSection(2, 120)
+        header.resizeSection(3, 160)
+
+        layout.addWidget(self._tree, stretch=1)
+
+        # 关闭按钮
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        close_btn = QPushButton("确定")
+        close_btn.setMinimumHeight(32)
+        close_btn.setMinimumWidth(80)
+        close_btn.clicked.connect(self.hide)
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        self.refresh_table()
+
+    def refresh_table(self) -> None:
+        self._tree.clear()
+        for pri, cat, lbl, pat in RAW_ALERT_RULE_DEFINITIONS:
+            item = QTreeWidgetItem(["内置", str(pri), cat, lbl, pat])
+            self._tree.addTopLevelItem(item)
+        user_items = load_user_rules_raw(_USER_RULES_PATH)
+        for it in user_items:
+            item = QTreeWidgetItem([
+                "自定义", str(it["priority"]), it["category"], it["label"], it["pattern"],
+            ])
+            self._tree.addTopLevelItem(item)
+
+    def _add_rule(self) -> None:
+        dlg = AddRuleDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_table()
+
+    def _del_rule(self) -> None:
+        sel = self._tree.selectedItems()
+        if not sel:
+            return
+        item = sel[0]
+        if item.text(0) != "自定义":
+            QMessageBox.information(self, "提示", "只能删除「自定义」规则。")
+            return
+        idx = self._tree.indexOfTopLevelItem(item)
+        items = load_user_rules_raw(_USER_RULES_PATH)
+        if 0 <= idx < len(items):
+            items.pop(idx)
             save_user_rules_raw(_USER_RULES_PATH, items)
-            self._refresh_rules_table()
+            self.refresh_table()
 
-    # ── 数据库 Bug 记录 ─────────────────────────────────────────
 
-    def _test_db_connection(self) -> None:
-        try:
-            from utils.db_manager import test_connection
-            ok, msg = test_connection()
-            if ok:
-                messagebox.showinfo("数据库", msg, parent=self.root)
-            else:
-                messagebox.showerror("数据库连接失败", msg, parent=self.root)
-        except Exception as e:
-            messagebox.showerror("数据库", f"无法导入 db_manager：{e}", parent=self.root)
+# ── 对话框：Bug 记录管理 ──────────────────────────────────────
 
-    def _open_bug_records(self) -> None:
+class BugRecordsDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Bug 记录（PostgreSQL）")
+        self.setMinimumSize(900, 500)
+        self.resize(1000, 580)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(12)
+
+        # 顶部筛选栏
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(10)
+
+        top_bar.addWidget(QLabel("筛选判别："))
+        self._filter_combo = QComboBox()
+        self._filter_combo.addItems(["全部", "待定", "确认", "误报", "忽略"])
+        self._filter_combo.setMinimumWidth(90)
+        self._filter_combo.currentTextChanged.connect(self.refresh_table)
+        top_bar.addWidget(self._filter_combo)
+
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.setMinimumHeight(32)
+        refresh_btn.clicked.connect(self.refresh_table)
+        top_bar.addWidget(refresh_btn)
+
+        top_bar.addStretch()
+
+        self._count_label = QLabel()
+        self._count_label.setObjectName("mutedLabel")
+        top_bar.addWidget(self._count_label)
+        layout.addLayout(top_bar)
+
+        # Bug 表格
+        self._tree = QTreeWidget()
+        self._tree.setColumnCount(6)
+        self._tree.setHeaderLabels(["ID", "Bug编号", "标题", "严重级别", "来源文件", "人工判别"])
+        self._tree.setAlternatingRowColors(True)
+        self._tree.setRootIsDecorated(False)
+        self._tree.setSelectionBehavior(QTreeWidget.SelectionBehavior.SelectRows)
+        self._tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        self._tree.itemSelectionChanged.connect(self._on_select)
+
+        header = self._tree.header()
+        header.setStretchLastSection(False)
+        header.resizeSection(0, 50)
+        header.resizeSection(1, 84)
+        header.resizeSection(2, 300)
+        header.resizeSection(3, 72)
+        header.resizeSection(4, 240)
+        header.resizeSection(5, 80)
+
+        layout.addWidget(self._tree, stretch=1)
+
+        # 审核面板
+        review_card = QWidget()
+        review_card.setStyleSheet("""
+            QWidget#reviewCard {
+                background: #fafbfc;
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+            }
+        """)
+        review_card.setObjectName("reviewCard")
+        review_layout = QVBoxLayout(review_card)
+        review_layout.setContentsMargins(14, 12, 14, 12)
+        review_layout.setSpacing(8)
+
+        row1 = QHBoxLayout()
+        row1.setSpacing(10)
+
+        row1.addWidget(QLabel("判别："))
+        self._verdict_combo = QComboBox()
+        self._verdict_combo.addItems(["待定", "确认", "误报", "忽略"])
+        self._verdict_combo.setMinimumWidth(80)
+        row1.addWidget(self._verdict_combo)
+
+        row1.addWidget(QLabel("备注："))
+        self._notes_edit = QLineEdit()
+        self._notes_edit.setPlaceholderText("输入审核备注…")
+        self._notes_edit.setMinimumHeight(32)
+        row1.addWidget(self._notes_edit, stretch=1)
+
+        save_btn = QPushButton("保存判别")
+        save_btn.setObjectName("accentBtn")
+        save_btn.setMinimumHeight(32)
+        save_btn.clicked.connect(self._save_verdict)
+        row1.addWidget(save_btn)
+
+        del_btn = QPushButton("删除记录")
+        del_btn.setMinimumHeight(32)
+        del_btn.clicked.connect(self._delete_record)
+        row1.addWidget(del_btn)
+
+        review_layout.addLayout(row1)
+
+        self._detail_label = QLabel("选中一行查看详情")
+        self._detail_label.setWordWrap(True)
+        self._detail_label.setObjectName("mutedLabel")
+        review_layout.addWidget(self._detail_label)
+
+        layout.addWidget(review_card)
+
+        self._selected_bug_id: int | None = None
+
         try:
             from utils.db_manager import init_db
             init_db()
-        except Exception as e:
-            messagebox.showerror("数据库", f"连接失败：{e}", parent=self.root)
-            return
-        if self._bug_win is not None and self._bug_win.winfo_exists():
-            self._bug_win.deiconify()
-            self._bug_win.lift()
-            self._refresh_bug_table()
-            return
-        self._build_bug_window()
-        self._refresh_bug_table()
+        except Exception:
+            pass
+        self.refresh_table()
 
-    def _build_bug_window(self) -> None:
-        win = tk.Toplevel(self.root)
-        win.title("Bug 记录（PostgreSQL）")
-        win.transient(self.root)
-        win.minsize(820, 420)
-        win.geometry("960x520")
-        outer = ttk.Frame(win, padding=8)
-        outer.pack(fill=tk.BOTH, expand=True)
-
-        top = ttk.Frame(outer)
-        top.pack(fill=tk.X, pady=(0, 6))
-        ttk.Label(top, text="筛选判别：").pack(side=tk.LEFT)
-        self._bug_filter_var = tk.StringVar(value="全部")
-        cb = ttk.Combobox(
-            top, textvariable=self._bug_filter_var, width=10, state="readonly",
-            values=["全部", "待定", "确认", "误报", "忽略"],
-        )
-        cb.pack(side=tk.LEFT, padx=(0, 8))
-        cb.bind("<<ComboboxSelected>>", lambda _: self._refresh_bug_table())
-        ttk.Button(top, text="刷新", command=self._refresh_bug_table, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=4,
-        )
-        self._bug_count_var = tk.StringVar()
-        ttk.Label(top, textvariable=self._bug_count_var, style="SubtleOnBg.TLabel").pack(side=tk.RIGHT)
-
-        cols = ("id", "bug_no", "title", "severity", "source", "verdict")
-        tree = ttk.Treeview(outer, columns=cols, show="headings", height=14, selectmode="browse")
-        tree.heading("id", text="ID")
-        tree.heading("bug_no", text="Bug编号")
-        tree.heading("title", text="标题")
-        tree.heading("severity", text="严重级别")
-        tree.heading("source", text="来源文件")
-        tree.heading("verdict", text="人工判别")
-        tree.column("id", width=44, stretch=False)
-        tree.column("bug_no", width=76, stretch=False)
-        tree.column("title", width=260)
-        tree.column("severity", width=64, stretch=False)
-        tree.column("source", width=200)
-        tree.column("verdict", width=72, stretch=False)
-        sy = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscrollcommand=sy.set)
-        tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        sy.pack(side=tk.RIGHT, fill=tk.Y)
-        self._bug_tree = tree
-
-        detail = ttk.LabelFrame(outer, text="审核", padding=(8, 6))
-        detail.pack(fill=tk.X, pady=(8, 0))
-
-        row1 = ttk.Frame(detail)
-        row1.pack(fill=tk.X, pady=(0, 4))
-        ttk.Label(row1, text="判别：").pack(side=tk.LEFT)
-        self._verdict_var = tk.StringVar(value="待定")
-        ttk.Combobox(
-            row1, textvariable=self._verdict_var, width=10, state="readonly",
-            values=["待定", "确认", "误报", "忽略"],
-        ).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Label(row1, text="备注：").pack(side=tk.LEFT)
-        self._verdict_notes_var = tk.StringVar()
-        ttk.Entry(row1, textvariable=self._verdict_notes_var, width=40).pack(side=tk.LEFT, padx=(0, 12))
-        ttk.Button(row1, text="保存判别", command=self._save_verdict, style="Accent.TButton").pack(side=tk.LEFT)
-        ttk.Button(row1, text="删除", command=self._delete_bug_record, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=(8, 0),
-        )
-
-        self._bug_detail_var = tk.StringVar(value="选中一行查看详情")
-        ttk.Label(detail, textvariable=self._bug_detail_var, wraplength=900, style="SubtleOnBg.TLabel").pack(
-            anchor=tk.W, fill=tk.X,
-        )
-
-        tree.bind("<<TreeviewSelect>>", self._on_bug_select)
-
-        def close():
-            win.withdraw()
-
-        win.protocol("WM_DELETE_WINDOW", close)
-        self._bug_win = win
-
-    def _refresh_bug_table(self) -> None:
-        if self._bug_tree is None:
-            return
-        for iid in self._bug_tree.get_children():
-            self._bug_tree.delete(iid)
+    def refresh_table(self) -> None:
+        self._tree.clear()
         try:
             from utils.db_manager import list_bugs, count_bugs
-            flt = self._bug_filter_var.get()
+            flt = self._filter_combo.currentText()
             rows = list_bugs(limit=500, verdict=flt if flt != "全部" else None)
             for r in rows:
                 src = r.get("source_file", "")
                 if len(src) > 40:
                     src = "…" + src[-38:]
-                self._bug_tree.insert(
-                    "", tk.END, iid=str(r["id"]),
-                    values=(
-                        r["id"], r.get("bug_no", ""), r.get("title", "")[:60],
-                        r.get("severity", ""), src, r.get("human_verdict", "待定"),
-                    ),
-                )
+                item = QTreeWidgetItem([
+                    str(r["id"]),
+                    r.get("bug_no", ""),
+                    (r.get("title", "") or "")[:60],
+                    r.get("severity", ""),
+                    src,
+                    r.get("human_verdict", "待定"),
+                ])
+                self._tree.addTopLevelItem(item)
             stats = count_bugs()
-            self._bug_count_var.set(
+            self._count_label.setText(
                 f"共 {stats.get('total',0)} 条 | "
                 f"待定 {stats.get('待定',0)} · 确认 {stats.get('确认',0)} · "
                 f"误报 {stats.get('误报',0)} · 忽略 {stats.get('忽略',0)}"
             )
         except Exception as e:
-            self._bug_count_var.set(f"加载失败：{e}")
+            self._count_label.setText(f"加载失败：{e}")
 
-    def _on_bug_select(self, _event: object = None) -> None:
-        if self._bug_tree is None:
-            return
-        sel = self._bug_tree.selection()
+    def _on_select(self) -> None:
+        sel = self._tree.selectedItems()
         if not sel:
+            self._selected_bug_id = None
             return
-        bug_id = int(sel[0])
+        bug_id = int(sel[0].text(0))
+        self._selected_bug_id = bug_id
         try:
             from utils.db_manager import get_bug
             b = get_bug(bug_id)
             if not b:
                 return
-            self._verdict_var.set(b.get("human_verdict", "待定"))
-            self._verdict_notes_var.set(b.get("human_notes", ""))
-            detail = (
+            idx = self._verdict_combo.findText(b.get("human_verdict", "待定"))
+            if idx >= 0:
+                self._verdict_combo.setCurrentIndex(idx)
+            self._notes_edit.setText(b.get("human_notes", ""))
+            self._detail_label.setText(
                 f"[{b.get('bug_no','')}] {b.get('title','')}\n"
                 f"类型：{b.get('bug_type','')}  时间：{b.get('log_time','')}\n"
-                f"结论：{b.get('conclusion','')[:200]}"
+                f"结论：{(b.get('conclusion','') or '')[:200]}"
             )
-            self._bug_detail_var.set(detail)
         except Exception:
             pass
 
     def _save_verdict(self) -> None:
-        if self._bug_tree is None:
+        if self._selected_bug_id is None:
+            QMessageBox.information(self, "提示", "请先选中一条 Bug。")
             return
-        sel = self._bug_tree.selection()
-        if not sel:
-            messagebox.showinfo("提示", "请先选中一条 Bug。", parent=self._bug_win)
-            return
-        bug_id = int(sel[0])
         try:
             from utils.db_manager import update_verdict
-            ok = update_verdict(bug_id, self._verdict_var.get(), self._verdict_notes_var.get())
+            ok = update_verdict(
+                self._selected_bug_id,
+                self._verdict_combo.currentText(),
+                self._notes_edit.text(),
+            )
             if ok:
-                self._refresh_bug_table()
-                self._bug_tree.selection_set(str(bug_id))
+                self.refresh_table()
+                # re-select
+                for i in range(self._tree.topLevelItemCount()):
+                    item = self._tree.topLevelItem(i)
+                    if item and item.text(0) == str(self._selected_bug_id):
+                        self._tree.setCurrentItem(item)
+                        break
         except Exception as e:
-            messagebox.showerror("保存失败", str(e)[:500], parent=self._bug_win)
+            QMessageBox.critical(self, "保存失败", str(e)[:500])
 
-    def _delete_bug_record(self) -> None:
-        if self._bug_tree is None:
+    def _delete_record(self) -> None:
+        if self._selected_bug_id is None:
             return
-        sel = self._bug_tree.selection()
-        if not sel:
-            return
-        bug_id = int(sel[0])
-        if not messagebox.askyesno("确认", f"删除 Bug #{bug_id}？", parent=self._bug_win):
+        reply = QMessageBox.question(
+            self, "确认", f"删除 Bug #{self._selected_bug_id}？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
             return
         try:
             from utils.db_manager import delete_bug
-            delete_bug(bug_id)
-            self._refresh_bug_table()
+            delete_bug(self._selected_bug_id)
+            self._selected_bug_id = None
+            self.refresh_table()
         except Exception as e:
-            messagebox.showerror("删除失败", str(e)[:500], parent=self._bug_win)
+            QMessageBox.critical(self, "删除失败", str(e)[:500])
 
-    # ── Skills 管理 ─────────────────────────────────────────────
 
-    def _open_skills_manager(self) -> None:
-        if self._skills_win is not None and self._skills_win.winfo_exists():
-            self._skills_win.deiconify()
-            self._skills_win.lift()
-            self._refresh_skills_table()
-            return
-        self._build_skills_window()
-        self._refresh_skills_table()
+# ── 对话框：添加自定义 Skill ──────────────────────────────────
 
-    def _build_skills_window(self) -> None:
-        win = tk.Toplevel(self.root)
-        win.title("Skills 管理")
-        win.transient(self.root)
-        win.minsize(700, 380)
-        win.geometry("780x440")
-        outer = ttk.Frame(win, padding=8)
-        outer.pack(fill=tk.BOTH, expand=True)
+class AddSkillDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("添加自定义 Skill")
+        self.setMinimumSize(540, 520)
+        self.resize(560, 560)
 
-        top = ttk.Frame(outer)
-        top.pack(fill=tk.X, pady=(0, 6))
-        ttk.Button(top, text="刷新", command=self._refresh_skills_table, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=(0, 8),
-        )
-        ttk.Button(top, text="+ 添加自定义 Skill", command=self._add_skill_dialog).pack(side=tk.LEFT)
-        ttk.Button(top, text="删除选中", command=self._delete_selected_skill, style="Secondary.TButton").pack(
-            side=tk.LEFT, padx=(8, 0),
-        )
-        self._skills_count_var = tk.StringVar()
-        ttk.Label(top, textvariable=self._skills_count_var, style="SubtleOnBg.TLabel").pack(side=tk.RIGHT)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(10)
 
-        cols = ("id", "name", "trigger", "priority", "enabled", "source")
-        tree = ttk.Treeview(outer, columns=cols, show="headings", height=12, selectmode="browse")
-        tree.heading("id", text="ID")
-        tree.heading("name", text="名称")
-        tree.heading("trigger", text="触发类别")
-        tree.heading("priority", text="优先级")
-        tree.heading("enabled", text="启用")
-        tree.heading("source", text="来源")
-        tree.column("id", width=120, stretch=False)
-        tree.column("name", width=160)
-        tree.column("trigger", width=180)
-        tree.column("priority", width=56, stretch=False)
-        tree.column("enabled", width=50, stretch=False)
-        tree.column("source", width=60, stretch=False)
-        sy = ttk.Scrollbar(outer, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscrollcommand=sy.set)
-        tree.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
-        sy.pack(side=tk.RIGHT, fill=tk.Y)
-        tree.bind("<Double-1>", self._toggle_skill_enabled)
-        self._skills_tree = tree
+        form = QFormLayout()
+        form.setSpacing(8)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
-        hint = ttk.Label(outer, text="双击行切换启用/禁用", style="SubtleOnBg.TLabel")
-        hint.pack(anchor=tk.W, pady=(4, 0))
+        self._id_edit = QLineEdit()
+        self._id_edit.setMinimumHeight(32)
+        self._name_edit = QLineEdit()
+        self._name_edit.setMinimumHeight(32)
+        self._trigger_cats = QLineEdit()
+        self._trigger_cats.setPlaceholderText("用逗号分隔，如：crash,memory")
+        self._trigger_cats.setMinimumHeight(32)
+        self._trigger_kws = QLineEdit()
+        self._trigger_kws.setPlaceholderText("用逗号分隔")
+        self._trigger_kws.setMinimumHeight(32)
+        self._ctx_lines = QLineEdit("25")
+        self._ctx_lines.setMinimumHeight(32)
+        self._priority = QLineEdit("5")
+        self._priority.setMinimumHeight(32)
 
-        def close():
-            win.withdraw()
-        win.protocol("WM_DELETE_WINDOW", close)
-        self._skills_win = win
+        form.addRow("Skill ID：", self._id_edit)
+        form.addRow("名称：", self._name_edit)
+        form.addRow("触发类别：", self._trigger_cats)
+        form.addRow("触发关键词：", self._trigger_kws)
+        form.addRow("上下文行数：", self._ctx_lines)
+        form.addRow("优先级：", self._priority)
+        layout.addLayout(form)
 
-    def _refresh_skills_table(self) -> None:
-        if self._skills_tree is None:
-            return
-        for iid in self._skills_tree.get_children():
-            self._skills_tree.delete(iid)
-        try:
-            from utils.cursor_skills import get_all_skills
-            skills = get_all_skills()
-            for s in skills:
-                cats = ", ".join(s.trigger_categories[:4])
-                self._skills_tree.insert(
-                    "", tk.END, iid=s.id,
-                    values=(
-                        s.id, s.name, cats, s.priority,
-                        "✓" if s.enabled else "✗",
-                        "内置" if s.builtin else "自定义",
-                    ),
-                )
-            self._skills_count_var.set(f"共 {len(skills)} 个 Skill")
-        except Exception as e:
-            self._skills_count_var.set(f"加载失败：{e}")
+        prompt_label = QLabel("Prompt 模板")
+        prompt_label.setStyleSheet("font-weight: 600; font-size: 13px; color: #374151;")
+        layout.addWidget(prompt_label)
 
-    def _toggle_skill_enabled(self, _event: object = None) -> None:
-        if self._skills_tree is None:
-            return
-        sel = self._skills_tree.selection()
-        if not sel:
-            return
-        skill_id = sel[0]
-        try:
-            from utils.cursor_skills import get_skill_by_id, toggle_skill
-            s = get_skill_by_id(skill_id)
-            if s:
-                toggle_skill(skill_id, not s.enabled)
-                self._refresh_skills_table()
-        except Exception:
-            pass
-
-    def _delete_selected_skill(self) -> None:
-        if self._skills_tree is None:
-            return
-        sel = self._skills_tree.selection()
-        if not sel:
-            return
-        skill_id = sel[0]
-        try:
-            from utils.cursor_skills import get_skill_by_id, delete_user_skill
-            s = get_skill_by_id(skill_id)
-            if s and s.builtin:
-                messagebox.showinfo("提示", "内置 Skill 不可删除，可双击禁用。", parent=self._skills_win)
-                return
-            if not messagebox.askyesno("确认", f"删除自定义 Skill「{skill_id}」？", parent=self._skills_win):
-                return
-            delete_user_skill(skill_id)
-            self._refresh_skills_table()
-        except Exception as e:
-            messagebox.showerror("删除失败", str(e)[:500], parent=self._skills_win)
-
-    def _add_skill_dialog(self) -> None:
-        dlg = tk.Toplevel(self._skills_win or self.root)
-        dlg.title("添加自定义 Skill")
-        dlg.transient(self._skills_win or self.root)
-        dlg.geometry("520x480")
-        body = ttk.Frame(dlg, padding=12)
-        body.pack(fill=tk.BOTH, expand=True)
-
-        fields: dict[str, tk.StringVar] = {}
-        for label_text, key, default in [
-            ("Skill ID（英文标识）", "id", ""),
-            ("名称", "name", ""),
-            ("触发类别（逗号分隔）", "trigger_categories", ""),
-            ("触发关键词（逗号分隔）", "trigger_keywords", ""),
-            ("上下文行数", "context_lines", "25"),
-            ("优先级（1-10）", "priority", "5"),
-        ]:
-            ttk.Label(body, text=label_text).pack(anchor=tk.W, pady=(6, 0))
-            var = tk.StringVar(value=default)
-            ttk.Entry(body, textvariable=var, width=50).pack(fill=tk.X)
-            fields[key] = var
-
-        ttk.Label(body, text="Prompt 模板").pack(anchor=tk.W, pady=(6, 0))
-        prompt_text = tk.Text(body, height=8, width=50, wrap=tk.WORD)
-        prompt_text.pack(fill=tk.BOTH, expand=True)
-        prompt_text.insert("1.0", (
+        self._prompt_edit = QTextEdit()
+        self._prompt_edit.setAcceptRichText(False)
+        mono_font = QFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        mono_font.setPointSize(10)
+        self._prompt_edit.setFont(mono_font)
+        self._prompt_edit.setPlainText(
             "你是XXX分析专家。以下日志片段包含可能的XXX异常。\n"
             "请严格按以下格式输出：\n"
             "【判定】确认异常 / 疑似误报 / 需更多上下文\n"
@@ -1635,127 +1763,508 @@ class MainApp:
             "【关键发现】一句话概述\n"
             "【建议】一句话排查建议\n\n"
             "--- 日志片段 ---\n"
-        ))
+        )
+        layout.addWidget(self._prompt_edit, stretch=1)
 
-        def save():
-            sid = fields["id"].get().strip()
-            if not sid:
-                messagebox.showwarning("提示", "Skill ID 不能为空", parent=dlg)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        b = buttons.button(QDialogButtonBox.StandardButton.Save)
+        if b:
+            b.setObjectName("accentBtn")
+            b.setMinimumHeight(34)
+        buttons.accepted.connect(self._save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _save(self) -> None:
+        sid = self._id_edit.text().strip()
+        if not sid:
+            QMessageBox.warning(self, "提示", "Skill ID 不能为空")
+            return
+        try:
+            from utils.cursor_skills import add_user_skill
+            add_user_skill({
+                "id": sid,
+                "name": self._name_edit.text().strip() or sid,
+                "trigger_categories": [
+                    c.strip()
+                    for c in self._trigger_cats.text().split(",")
+                    if c.strip()
+                ],
+                "trigger_keywords": [
+                    k.strip()
+                    for k in self._trigger_kws.text().split(",")
+                    if k.strip()
+                ],
+                "context_lines": int(self._ctx_lines.text() or "25"),
+                "priority": int(self._priority.text() or "5"),
+                "prompt_template": self._prompt_edit.toPlainText().strip() + "\n",
+                "enabled": True,
+            })
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "保存失败", str(e)[:500])
+
+
+# ── 对话框：Skills 管理 ───────────────────────────────────────
+
+class SkillsManagerDialog(QDialog):
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Skills 管理")
+        self.setMinimumSize(740, 420)
+        self.resize(820, 500)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(12)
+
+        # 工具栏
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(8)
+
+        refresh_btn = QPushButton("刷新")
+        refresh_btn.setMinimumHeight(32)
+        refresh_btn.clicked.connect(self.refresh_table)
+        add_btn = QPushButton("+ 添加 Skill")
+        add_btn.setMinimumHeight(32)
+        add_btn.clicked.connect(self._add_skill)
+        del_btn = QPushButton("删除选中")
+        del_btn.setMinimumHeight(32)
+        del_btn.clicked.connect(self._delete_skill)
+
+        toolbar.addWidget(refresh_btn)
+        toolbar.addWidget(add_btn)
+        toolbar.addWidget(del_btn)
+        toolbar.addStretch()
+
+        self._count_label = QLabel()
+        self._count_label.setObjectName("mutedLabel")
+        toolbar.addWidget(self._count_label)
+        layout.addLayout(toolbar)
+
+        # Skills 表格
+        self._tree = QTreeWidget()
+        self._tree.setColumnCount(6)
+        self._tree.setHeaderLabels(["ID", "名称", "触发类别", "优先级", "启用", "来源"])
+        self._tree.setAlternatingRowColors(True)
+        self._tree.setRootIsDecorated(False)
+        self._tree.setSelectionBehavior(QTreeWidget.SelectionBehavior.SelectRows)
+        self._tree.setSelectionMode(QTreeWidget.SelectionMode.SingleSelection)
+        self._tree.itemDoubleClicked.connect(self._toggle_enabled)
+
+        header = self._tree.header()
+        header.setStretchLastSection(False)
+        header.resizeSection(0, 140)
+        header.resizeSection(1, 170)
+        header.resizeSection(2, 210)
+        header.resizeSection(3, 60)
+        header.resizeSection(4, 54)
+        header.resizeSection(5, 64)
+
+        layout.addWidget(self._tree, stretch=1)
+
+        hint = QLabel("提示：双击行切换启用/禁用；内置 Skill 不可删除，可双击禁用。")
+        hint.setObjectName("mutedLabel")
+        layout.addWidget(hint)
+
+        self.refresh_table()
+
+    def refresh_table(self) -> None:
+        self._tree.clear()
+        try:
+            from utils.cursor_skills import get_all_skills
+            skills = get_all_skills()
+            for s in skills:
+                cats = ", ".join(s.trigger_categories[:4])
+                item = QTreeWidgetItem([
+                    s.id, s.name, cats, str(s.priority),
+                    "✓" if s.enabled else "✗",
+                    "内置" if s.builtin else "自定义",
+                ])
+                self._tree.addTopLevelItem(item)
+            self._count_label.setText(f"共 {len(skills)} 个 Skill")
+        except Exception as e:
+            self._count_label.setText(f"加载失败：{e}")
+
+    def _toggle_enabled(self, item: QTreeWidgetItem) -> None:
+        skill_id = item.text(0)
+        try:
+            from utils.cursor_skills import get_skill_by_id, toggle_skill
+            s = get_skill_by_id(skill_id)
+            if s:
+                toggle_skill(skill_id, not s.enabled)
+                self.refresh_table()
+        except Exception:
+            pass
+
+    def _add_skill(self) -> None:
+        dlg = AddSkillDialog(self)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self.refresh_table()
+
+    def _delete_skill(self) -> None:
+        sel = self._tree.selectedItems()
+        if not sel:
+            return
+        skill_id = sel[0].text(0)
+        try:
+            from utils.cursor_skills import get_skill_by_id, delete_user_skill
+            s = get_skill_by_id(skill_id)
+            if s and s.builtin:
+                QMessageBox.information(self, "提示", "内置 Skill 不可删除，可双击禁用。")
                 return
-            try:
-                from utils.cursor_skills import add_user_skill
-                add_user_skill({
-                    "id": sid,
-                    "name": fields["name"].get().strip() or sid,
-                    "trigger_categories": [c.strip() for c in fields["trigger_categories"].get().split(",") if c.strip()],
-                    "trigger_keywords": [k.strip() for k in fields["trigger_keywords"].get().split(",") if k.strip()],
-                    "context_lines": int(fields["context_lines"].get() or "25"),
-                    "priority": int(fields["priority"].get() or "5"),
-                    "prompt_template": prompt_text.get("1.0", tk.END).strip() + "\n",
-                    "enabled": True,
-                })
-                dlg.destroy()
-                self._refresh_skills_table()
-            except Exception as e:
-                messagebox.showerror("保存失败", str(e)[:500], parent=dlg)
+            reply = QMessageBox.question(
+                self, "确认", f"删除自定义 Skill「{skill_id}」？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            delete_user_skill(skill_id)
+            self.refresh_table()
+        except Exception as e:
+            QMessageBox.critical(self, "删除失败", str(e)[:500])
 
-        btn_frame = ttk.Frame(body)
-        btn_frame.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(btn_frame, text="保存", command=save, style="Accent.TButton").pack(side=tk.RIGHT)
-        ttk.Button(btn_frame, text="取消", command=dlg.destroy, style="Secondary.TButton").pack(side=tk.RIGHT, padx=(0, 8))
+
+# ── 主窗口 ────────────────────────────────────────────────────
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("串口日志分析")
+        self.setMinimumSize(520, 420)
+
+        screen = QApplication.primaryScreen()
+        if screen:
+            sg = screen.availableGeometry()
+            ww = min(780, max(520, int(sg.width() * 0.52)))
+            wh = min(640, max(460, int(sg.height() * 0.62)))
+            self.resize(ww, wh)
+            self.move((sg.width() - ww) // 2, (sg.height() - wh) // 2)
+
+        self.setStyleSheet(QSS)
+
+        # 状态变量
+        self._current_file: Path | None = None
+        self._last_result = ""
+        self._analysis_notes = ""
+        self._clean_prompt_body = _default_cleaning_prompt()
+        self._worker: AnalysisWorker | None = None
+        self._import_worker: ImportWorker | None = None
+
+        # 懒加载对话框
+        self._deepseek_dlg: DeepSeekConfigDialog | None = None
+        self._clean_dlg: CleanSettingsDialog | None = None
+        self._rules_dlg: RulesDialog | None = None
+        self._bug_dlg: BugRecordsDialog | None = None
+        self._skills_dlg: SkillsManagerDialog | None = None
+
+        self.setFont(QFont("Microsoft YaHei UI", 9))
+        self._build_menu_bar()
+        self._build_central_widget()
+        self._build_status_bar()
+
+    # ── 菜单栏 ─────────────────────────────────────────────────
+
+    def _build_menu_bar(self) -> None:
+        mb = self.menuBar()
+
+        # 文件
+        file_menu = mb.addMenu("文件")
+        file_menu.addAction(QAction("打开…", self, triggered=self._pick_file))
+
+        # 设置
+        settings_menu = mb.addMenu("设置")
+        settings_menu.addAction(QAction("DeepSeek API…", self, triggered=self._open_deepseek_config))
+        settings_menu.addAction(QAction("清洗与分析材料…", self, triggered=self._open_clean_config))
+
+        # 规则
+        rules_menu = mb.addMenu("规则")
+        rules_menu.addAction(QAction("串口匹配规则…", self, triggered=self._open_rules_config))
+        rules_menu.addAction(QAction("从 Excel/CSV 导入规则…", self, triggered=self._import_rules_from_xlsx))
+
+        # 数据库
+        db_menu = mb.addMenu("数据库")
+        db_menu.addAction(QAction("Bug 记录…", self, triggered=self._open_bug_records))
+        db_menu.addAction(QAction("测试连接…", self, triggered=self._test_db_connection))
+
+        # Skills
+        skills_menu = mb.addMenu("Skills")
+        skills_menu.addAction(QAction("管理 Skills…", self, triggered=self._open_skills_manager))
+
+        # 直接命令
+        mb.addAction(QAction("免责声明", self, triggered=self._show_disclaimer))
+        mb.addAction(QAction("关于", self, triggered=self._show_about))
+
+    # ── 中央区域 ───────────────────────────────────────────────
+
+    def _build_central_widget(self) -> None:
+        central = QWidget()
+        root = QVBoxLayout(central)
+        root.setContentsMargins(14, 10, 14, 10)
+        root.setSpacing(10)
+
+        # ── 顶部：文件路径条 ──────────────────────────────────
+        path_bar = QWidget()
+        path_bar.setStyleSheet("""
+            QWidget#pathBar {
+                background: #ffffff;
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+            }
+        """)
+        path_bar.setObjectName("pathBar")
+        path_row = QHBoxLayout(path_bar)
+        path_row.setContentsMargins(14, 10, 14, 10)
+        path_row.setSpacing(8)
+
+        file_icon = QLabel("\U0001f4c4")
+        file_icon.setStyleSheet("font-size: 16px; border: none; background: transparent;")
+        path_row.addWidget(file_icon)
+
+        self._path_label = QLabel("未选择文件（文件 → 打开…；规则见「规则」菜单，清洗见「设置」）")
+        self._path_label.setObjectName("pathLabel")
+        self._path_label.setWordWrap(True)
+        self._path_label.setStyleSheet("border: none; background: transparent;")
+        path_row.addWidget(self._path_label, stretch=1)
+
+        root.addWidget(path_bar)
+
+        # ── 主体：结果区 ──────────────────────────────────────
+        result_card = QWidget()
+        result_card.setStyleSheet("""
+            QWidget#resultCard {
+                background: #ffffff;
+                border: 1px solid #e5e7eb;
+                border-radius: 10px;
+            }
+        """)
+        result_card.setObjectName("resultCard")
+        result_layout = QVBoxLayout(result_card)
+        result_layout.setContentsMargins(14, 14, 14, 12)
+        result_layout.setSpacing(10)
+
+        # 标题行
+        header_row = QHBoxLayout()
+        header_row.setSpacing(6)
+        title_lbl = QLabel("分析结果")
+        title_lbl.setStyleSheet(
+            "font-weight: 600; font-size: 14px; color: #374151; border: none; background: transparent;"
+        )
+        header_row.addWidget(title_lbl)
+        header_row.addStretch()
+
+        self._char_count_lbl = QLabel("")
+        self._char_count_lbl.setObjectName("mutedLabel")
+        self._char_count_lbl.setStyleSheet("border: none; background: transparent;")
+        header_row.addWidget(self._char_count_lbl)
+        result_layout.addLayout(header_row)
+
+        # 文本区
+        self._result_edit = QTextEdit()
+        self._result_edit.setReadOnly(True)
+        self._result_edit.setPlaceholderText("分析结果将在此显示…")
+        mono_font = QFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
+        mono_font.setPointSize(10)
+        self._result_edit.setFont(mono_font)
+        result_layout.addWidget(self._result_edit, stretch=1)
+
+        # 底部工具栏
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(10)
+
+        self._run_btn = QPushButton("  开始分析")
+        self._run_btn.setObjectName("accentBtn")
+        self._run_btn.setMinimumHeight(36)
+        self._run_btn.clicked.connect(self._run)
+        toolbar.addWidget(self._run_btn)
+
+        save_btn = QPushButton("保存 TXT…")
+        save_btn.setMinimumHeight(36)
+        save_btn.clicked.connect(self._save_result)
+        toolbar.addWidget(save_btn)
+
+        toolbar.addSpacing(10)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setMaximum(100)
+        self._progress_bar.setValue(0)
+        self._progress_bar.setTextVisible(False)
+        self._progress_bar.setFixedHeight(6)
+        self._progress_bar.setMinimumWidth(120)
+        toolbar.addWidget(self._progress_bar, stretch=1)
+
+        result_layout.addLayout(toolbar)
+        root.addWidget(result_card, stretch=1)
+
+        self.setCentralWidget(central)
+
+    # ── 状态栏 ─────────────────────────────────────────────────
+
+    def _build_status_bar(self) -> None:
+        self._status_bar = QStatusBar()
+        self.setStatusBar(self._status_bar)
+        self._status_bar.showMessage("就绪  —  选择日志文件后点击「开始分析」")
+
+    # ── 文件操作 ───────────────────────────────────────────────
+
+    def _pick_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择串口日志",
+            str(_ROOT),
+            "日志文件 (*.log *.txt);;所有文件 (*.*)",
+        )
+        if path:
+            self._current_file = Path(path)
+            self._path_label.setText(str(self._current_file))
+
+    # ── 菜单动作 ───────────────────────────────────────────────
+
+    def _show_disclaimer(self) -> None:
+        QMessageBox.information(self, "免责声明", DISCLAIMER_TEXT)
+
+    def _show_about(self) -> None:
+        QMessageBox.information(
+            self, "关于",
+            f"作者：{APP_AUTHOR}\n版本：{APP_VERSION}",
+        )
+
+    def _open_deepseek_config(self) -> None:
+        if self._deepseek_dlg is None:
+            self._deepseek_dlg = DeepSeekConfigDialog(self)
+        self._deepseek_dlg.exec()
+
+    def _open_clean_config(self) -> None:
+        if self._clean_dlg is None:
+            self._clean_dlg = CleanSettingsDialog(
+                self._analysis_notes,
+                self._clean_prompt_body,
+                self,
+            )
+        else:
+            self._clean_dlg.refresh_fields(self._analysis_notes, self._clean_prompt_body)
+        if self._clean_dlg.exec() == QDialog.DialogCode.Accepted:
+            self._analysis_notes = self._clean_dlg.get_notes()
+            self._clean_prompt_body = self._clean_dlg.get_clean_prompt()
+
+    def _open_rules_config(self) -> None:
+        if self._rules_dlg is None:
+            self._rules_dlg = RulesDialog(self)
+        else:
+            self._rules_dlg.refresh_table()
+        self._rules_dlg.show()
+        self._rules_dlg.raise_()
+        self._rules_dlg.activateWindow()
+
+    def _open_bug_records(self) -> None:
+        if self._bug_dlg is None:
+            self._bug_dlg = BugRecordsDialog(self)
+        else:
+            self._bug_dlg.refresh_table()
+        self._bug_dlg.show()
+        self._bug_dlg.raise_()
+        self._bug_dlg.activateWindow()
+
+    def _test_db_connection(self) -> None:
+        try:
+            from utils.db_manager import test_connection
+            ok, msg = test_connection()
+            if ok:
+                QMessageBox.information(self, "数据库", msg)
+            else:
+                QMessageBox.critical(self, "数据库连接失败", msg)
+        except Exception as e:
+            QMessageBox.critical(self, "数据库", f"无法导入 db_manager：{e}")
+
+    def _open_skills_manager(self) -> None:
+        if self._skills_dlg is None:
+            self._skills_dlg = SkillsManagerDialog(self)
+        else:
+            self._skills_dlg.refresh_table()
+        self._skills_dlg.show()
+        self._skills_dlg.raise_()
+        self._skills_dlg.activateWindow()
+
+    # ── 规则导入 ───────────────────────────────────────────────
 
     def _import_rules_from_xlsx(self) -> None:
-        if self._import_thread is not None and self._import_thread.is_alive():
-            messagebox.showinfo("提示", "已有规则导入任务在运行。", parent=self.root)
+        if self._import_worker is not None and self._import_worker.isRunning():
+            QMessageBox.information(self, "提示", "已有规则导入任务在运行。")
             return
         if not os.environ.get("DEEPSEEK_API_KEY", "").strip():
-            messagebox.showwarning(
-                "未配置 DeepSeek",
+            QMessageBox.warning(
+                self, "未配置 DeepSeek",
                 "请先在「设置 → DeepSeek API…」中填写 DEEPSEEK_API_KEY。",
-                parent=self.root,
             )
             return
-        path = filedialog.askopenfilename(
-            parent=self.root,
-            title="选择压测用例等表格文件（Excel 或 CSV）",
-            initialdir=str(_ROOT),
-            filetypes=[
-                ("Excel / CSV", "*.xlsx;*.xlsm;*.csv"),
-                ("Excel 工作簿", "*.xlsx;*.xlsm"),
-                ("CSV", "*.csv"),
-                ("所有文件", "*.*"),
-            ],
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择压测用例等表格文件（Excel 或 CSV）",
+            str(_ROOT),
+            "Excel/CSV (*.xlsx *.xlsm *.csv);;Excel (*.xlsx *.xlsm);;CSV (*.csv);;所有文件 (*.*)",
         )
         if not path:
             return
         src_path = Path(path)
         if not src_path.is_file():
-            messagebox.showwarning("提示", "所选路径无效。", parent=self.root)
+            QMessageBox.warning(self, "提示", "所选路径无效。")
             return
         if src_path.suffix.lower() not in (".csv", ".xlsx", ".xlsm"):
-            messagebox.showwarning("提示", "请选择 .xlsx、.xlsm 或 .csv 文件。", parent=self.root)
+            QMessageBox.warning(self, "提示", "请选择 .xlsx、.xlsm 或 .csv 文件。")
             return
 
-        self._status.set("正在读取表格并调用 DeepSeek 提取规则（可能较久）…")
+        self._status_bar.showMessage("正在读取表格并调用 DeepSeek 提取规则（可能较久）…")
 
-        def worker() -> None:
-            try:
-                plain = _tabular_rules_source_to_plain(src_path)
-                llm_text = _deepseek_submit(_rule_import_prompt(plain))
-                new_items = _rules_from_llm_response(llm_text)
-                if not new_items:
-                    raise ValueError("模型未返回任何可用规则。")
-            except Exception as e:
-                msg = str(e)
-                if len(msg) > 1600:
-                    msg = msg[:1600] + "…"
+        self._import_worker = ImportWorker(src_path)
+        self._import_worker.finished.connect(self._on_import_finished)
 
-                def on_err() -> None:
-                    self._status.set("规则导入失败。")
-                    messagebox.showerror("导入失败", msg, parent=self.root)
+        def on_error():
+            QMessageBox.critical(self, "导入失败", "规则导入过程中出现错误。")
 
-                self.root.after(0, on_err)
-                return
+        self._import_worker.finished.connect(
+            lambda items, name: self._finish_import(items, name)
+        )
+        self._import_worker.start()
 
-            existing = load_user_rules_raw(_USER_RULES_PATH)
-            reserved: set[str] = {x["category"] for x in existing} | set(_BUILTIN_RULE_CATEGORIES)
-            added: list[dict] = []
-            for it in new_items:
-                c = it["category"]
-                if c in reserved:
-                    base = c
-                    n = 2
-                    while f"{base}_{n}" in reserved:
-                        n += 1
-                    c = f"{base}_{n}"
-                it["category"] = c
-                reserved.add(c)
-                added.append(it)
-            merged = existing + added
+    def _finish_import(self, new_items: list[dict], name: str) -> None:
+        existing = load_user_rules_raw(_USER_RULES_PATH)
+        reserved: set[str] = {x["category"] for x in existing} | set(_BUILTIN_RULE_CATEGORIES)
+        added: list[dict] = []
+        for it in new_items:
+            c = it["category"]
+            if c in reserved:
+                base = c
+                n = 2
+                while f"{base}_{n}" in reserved:
+                    n += 1
+                c = f"{base}_{n}"
+            it["category"] = c
+            reserved.add(c)
+            added.append(it)
+        merged = existing + added
+        save_user_rules_raw(_USER_RULES_PATH, merged)
+        if self._rules_dlg is not None:
+            self._rules_dlg.refresh_table()
+        self._status_bar.showMessage(f"已导入 {len(added)} 条自定义规则。")
+        QMessageBox.information(
+            self, "导入完成",
+            f"已从「{name}」经 DeepSeek 提取并追加 {len(added)} 条规则到 serial_rules_user.json。\n"
+            f"（若 category 与已有或内置键冲突，已自动加后缀。）",
+        )
 
-            def on_ok() -> None:
-                save_user_rules_raw(_USER_RULES_PATH, merged)
-                self._refresh_rules_table()
-                self._status.set(f"已导入 {len(added)} 条自定义规则。")
-                messagebox.showinfo(
-                    "导入完成",
-                    f"已从「{src_path.name}」经 DeepSeek 提取并追加 {len(added)} 条规则到 serial_rules_user.json。\n"
-                    f"（若 category 与已有或内置键冲突，已自动加后缀。）",
-                    parent=self.root,
-                )
-
-            self.root.after(0, on_ok)
-
-        self._import_thread = threading.Thread(target=worker, daemon=True)
-        self._import_thread.start()
+    # ── 分析运行 ───────────────────────────────────────────────
 
     def _run(self) -> None:
-        if self._worker_thread and self._worker_thread.is_alive():
-            messagebox.showinfo("提示", "已有任务在运行。", parent=self.root)
+        if self._worker is not None and self._worker.isRunning():
+            QMessageBox.information(self, "提示", "已有任务在运行。")
             return
         if not self._current_file or not self._current_file.is_file():
-            messagebox.showwarning("提示", "请先选择有效的日志文件。", parent=self.root)
+            QMessageBox.warning(self, "提示", "请先选择有效的日志文件。")
             return
+
         mc = int(os.environ.get("SUMMARY_MAX_CHARS", "90000"))
         cfg = WorkerConfig(
             file_path=self._current_file,
@@ -1763,77 +2272,66 @@ class MainApp:
             user_clean_prompt=self._clean_prompt_body,
             user_analysis_notes=self._analysis_notes,
         )
-        self._set_result_text("")
-        self._progress["value"] = 0
-        self._status.set("")
-        while True:
-            try:
-                self._msg_q.get_nowait()
-            except queue.Empty:
-                break
 
-        def thread_target() -> None:
-            _run_analyze(cfg, self._msg_q)
+        self._result_edit.clear()
+        self._progress_bar.setValue(0)
+        self._run_btn.setEnabled(False)
 
-        self._worker_thread = threading.Thread(target=thread_target, daemon=True)
-        self._worker_thread.start()
-        self.root.after(80, self._poll_queue)
+        self._worker = AnalysisWorker(cfg)
+        self._worker.progress_signal.connect(self._on_progress)
+        self._worker.result_signal.connect(self._on_result)
+        self._worker.error_signal.connect(self._on_error)
+        self._worker.finished.connect(lambda: self._run_btn.setEnabled(True))
+        self._worker.start()
 
-    def _poll_queue(self) -> None:
-        def drain() -> None:
-            try:
-                while True:
-                    kind, *rest = self._msg_q.get_nowait()
-                    if kind == "progress":
-                        pct, msg = rest
-                        self._progress["value"] = pct
-                        self._status.set(msg)
-                    elif kind == "ok":
-                        text = rest[0]
-                        self._last_result = text
-                        self._set_result_text(text)
-                        self._status.set("完成。")
-                    elif kind == "err":
-                        err = rest[0]
-                        self._set_result_text(err)
-                        self._status.set("失败。")
-                        messagebox.showerror("错误", err[:800], parent=self.root)
-            except queue.Empty:
-                pass
+    def _on_progress(self, pct: int, msg: str) -> None:
+        self._progress_bar.setValue(pct)
+        self._status_bar.showMessage(msg)
+        if pct == 0:
+            self._char_count_lbl.setText("")
 
-        drain()
-        alive = self._worker_thread is not None and self._worker_thread.is_alive()
-        if alive:
-            self.root.after(80, self._poll_queue)
-        else:
-            drain()
+    def _on_result(self, text: str) -> None:
+        self._last_result = text
+        self._result_edit.setPlainText(text)
+        self._status_bar.showMessage("完成。")
+        lines = text.count("\n") + 1
+        chars = len(text)
+        self._char_count_lbl.setText(f"{lines} 行 · {chars:,} 字符")
+
+    def _on_error(self, err: str) -> None:
+        self._result_edit.setPlainText(err)
+        self._status_bar.showMessage("失败。")
+        QMessageBox.critical(self, "错误", err[:800])
+
+    # ── 保存结果 ───────────────────────────────────────────────
 
     def _save_result(self) -> None:
         if not self._last_result.strip():
-            messagebox.showinfo("提示", "没有可保存的内容。", parent=self.root)
+            QMessageBox.information(self, "提示", "没有可保存的内容。")
             return
         ts = datetime.now().strftime("%Y%m%d_%H%M")
         default = _ROOT / "bugs" / f"serial_gui_summary_{ts}.txt"
-        path = filedialog.asksaveasfilename(
-            parent=self.root,
-            title="保存分析结果",
-            initialfile=default.name,
-            initialdir=str(default.parent),
-            defaultextension=".txt",
-            filetypes=[("文本", "*.txt")],
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "保存分析结果",
+            str(default),
+            "文本文件 (*.txt)",
         )
         if path:
             p = Path(path)
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(self._last_result, encoding="utf-8")
-            self._status.set(f"已保存：{p}")
+            self._status_bar.showMessage(f"已保存：{p}")
 
-    def mainloop(self) -> None:
-        self.root.mainloop()
 
+# ── 入口 ──────────────────────────────────────────────────────
 
 def main() -> None:
-    MainApp().mainloop()
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
