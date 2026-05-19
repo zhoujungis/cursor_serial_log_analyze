@@ -185,7 +185,7 @@ def _repair_mojibake_text(text: str) -> str:
         return text
     try:
         fixed = text.encode("latin1", errors="strict").decode("utf-8", errors="strict")
-        if fixed.count("�") <= text.count("�"):
+        if fixed.count(" ") <= text.count(" "):
             return fixed
     except Exception:
         return text
@@ -486,7 +486,7 @@ def build_summarize_prompt_serial(
 
 _USER_RULES_PATH = _ROOT / "config/serial_rules_user.json"
 
-APP_VERSION = "V 0.6"
+APP_VERSION = "V 1.0"
 APP_AUTHOR = "zhoujun@glazero.com"
 DISCLAIMER_TEXT = (
     "本次分析结果只对本次导入的串口 log 有效；\n"
