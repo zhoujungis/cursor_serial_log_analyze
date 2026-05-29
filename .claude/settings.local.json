@@ -16,7 +16,8 @@
       "Bash(Get-ChildItem -Recurse -Depth 3 \"D:\\\\AutoAnalizeLog\")",
       "Bash(Select-Object FullName, Length, Mode)",
       "Bash(Format-Table -AutoSize)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(Get-ChildItem *)"
     ]
   }
 }
